@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use rnes::{cpu, roms};
 
 fn main() {
@@ -11,21 +12,22 @@ fn main() {
 }
 
 fn run_official_only() {
+    let path = "nes_test_roms\\instr_test-v3\\all_instrs.nes";
     //let path = "nes_test_roms\\instr_test-v3\\official_only.nes";
     //let path = "nes_test_roms\\instr_test-v3\\rom_singles\\01-implied.nes";
     //let path = "nes_test_roms\\instr_test-v3\\rom_singles\\02-immediate.nes";
 
     //let path = "nes_test_roms\\instr_misc\\instr_misc.nes";
     //let path = "nes_test_roms\\blargg_nes_cpu_test5\\official.nes";
-    let path = "nestest.nes";
+    //let path = "nestest.nes";
 
     let cartridge = roms::read_rom(path);
     let mut cpu = cpu::Cpu::new();
     cpu.load_cartridge(cartridge);
     cpu.init();
 
-    cpu.set_pc(0xC000);
-    cpu.logger.enable_logging();
+    //cpu.set_pc(0xC000);
+    //cpu.logger.enable_logging();
 
     let mut i = 0;
 
@@ -83,7 +85,7 @@ fn run_official_only() {
             let s = String::from_utf8_lossy(&buffer);
             println!("{}", s);
             i = 0;
-            //std::thread::sleep(std::time::Duration::from_millis(100));
+            std::thread::sleep(std::time::Duration::from_millis(100));
         }
     }
 }

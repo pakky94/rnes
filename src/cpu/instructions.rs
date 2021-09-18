@@ -1,16 +1,11 @@
+
 use super::{
     AddressingMode, AddressingResult,
     AddressingResult::{Address, Done, Implied, Relative, Value, ValueAddress},
     Cpu,
 };
 
-use crate::{
-    cpu,
-    utils::{
-        self, add_with_carry, merge_u16, overflowing_add_u8_i8, rotate_left, rotate_right,
-        shift_left, shift_right, split_u16, subtract_with_carry,
-    },
-};
+use crate::{cpu, utils::{self, add_with_carry, compare_u8, merge_u16, overflowing_add_u8_i8, rotate_left, rotate_right, shift_left, shift_right, split_u16, subtract_with_carry}};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Instruction {
@@ -42,7 +37,7 @@ impl Instruction {
             0x87 => Self::new(BaseInstruction::AAX, AddressingMode::zero_page_addr()),
             0x97 => Self::new(BaseInstruction::AAX, AddressingMode::zero_page_y_addr()),
             0x83 => Self::new(
-                BaseInstruction::STA,
+                BaseInstruction::AAX,
                 AddressingMode::indexed_indirect_addr(),
             ),
             0x8F => Self::new(BaseInstruction::AAX, AddressingMode::absolute_addr()),
@@ -57,6 +52,9 @@ impl Instruction {
             0x79 => Self::new(BaseInstruction::ADC, AddressingMode::absolute_y_val()),
             0x7D => Self::new(BaseInstruction::ADC, AddressingMode::absolute_x_val()),
 
+            // ALR
+            0x4B => Self::new(BaseInstruction::ALR, AddressingMode::Immediate),
+
             // AND
             0x21 => Self::new(BaseInstruction::AND, AddressingMode::indexed_indirect_val()),
             0x25 => Self::new(BaseInstruction::AND, AddressingMode::zero_page_val()),
@@ -67,12 +65,21 @@ impl Instruction {
             0x39 => Self::new(BaseInstruction::AND, AddressingMode::absolute_y_val()),
             0x3D => Self::new(BaseInstruction::AND, AddressingMode::absolute_x_val()),
 
+            // ARR
+            0x6B => Self::new(BaseInstruction::ARR, AddressingMode::Immediate),
+
             // ASL
             0x06 => Self::new(BaseInstruction::ASL, AddressingMode::zero_page_val_addr()),
             0x0A => Self::new(BaseInstruction::ASL, AddressingMode::Accumulator),
             0x0E => Self::new(BaseInstruction::ASL, AddressingMode::absolute_val_addr()),
             0x16 => Self::new(BaseInstruction::ASL, AddressingMode::zero_page_x_val_addr()),
             0x1E => Self::new(BaseInstruction::ASL, AddressingMode::absolute_x_val_addr()),
+
+            // ATX
+            0xAB => Self::new(BaseInstruction::ATX, AddressingMode::Immediate),
+
+            // AXS
+            0xCB => Self::new(BaseInstruction::AXS, AddressingMode::Immediate),
 
             // BIT
             0x24 => Self::new(BaseInstruction::BIT, AddressingMode::zero_page_val()),
@@ -116,6 +123,15 @@ impl Instruction {
             0xC0 => Self::new(BaseInstruction::CPY, AddressingMode::Immediate),
             0xC4 => Self::new(BaseInstruction::CPY, AddressingMode::zero_page_val()),
             0xCC => Self::new(BaseInstruction::CPY, AddressingMode::absolute_val()),
+
+            // DCP
+            0xC7 => Self::new(BaseInstruction::DCP, AddressingMode::zero_page_val_addr()),
+            0xD7 => Self::new(BaseInstruction::DCP, AddressingMode::zero_page_x_val_addr()),
+            0xCF => Self::new(BaseInstruction::DCP, AddressingMode::absolute_val_addr()),
+            0xDF => Self::new(BaseInstruction::DCP, AddressingMode::absolute_x_val_addr()),
+            0xDB => Self::new(BaseInstruction::DCP, AddressingMode::absolute_y_val_addr()),
+            0xC3 => Self::new(BaseInstruction::DCP, AddressingMode::indexed_indirect_val_addr()),
+            0xD3 => Self::new(BaseInstruction::DCP, AddressingMode::indirect_indexed_val_addr()),
 
             // Decrement
             0xC6 => Self::new(BaseInstruction::DEC, AddressingMode::zero_page_val_addr()),
@@ -166,6 +182,15 @@ impl Instruction {
             0xBF => Self::new(BaseInstruction::LAX, AddressingMode::absolute_y_val()),
             0xA3 => Self::new(BaseInstruction::LAX, AddressingMode::indexed_indirect_val()),
             0xB3 => Self::new(BaseInstruction::LAX, AddressingMode::indirect_indexed_val()),
+
+            // ISC
+            0xE7 => Self::new(BaseInstruction::ISC, AddressingMode::zero_page_val_addr()),
+            0xF7 => Self::new(BaseInstruction::ISC, AddressingMode::zero_page_x_val_addr()),
+            0xEF => Self::new(BaseInstruction::ISC, AddressingMode::absolute_val_addr()),
+            0xFF => Self::new(BaseInstruction::ISC, AddressingMode::absolute_x_val_addr()),
+            0xFB => Self::new(BaseInstruction::ISC, AddressingMode::absolute_y_val_addr()),
+            0xE3 => Self::new(BaseInstruction::ISC, AddressingMode::indexed_indirect_val_addr()),
+            0xF3 => Self::new(BaseInstruction::ISC, AddressingMode::indirect_indexed_val_addr()),
 
             // LDA
             0xA1 => Self::new(BaseInstruction::LDA, AddressingMode::indexed_indirect_val()),
@@ -232,6 +257,24 @@ impl Instruction {
             0x68 => Self::new(BaseInstruction::PLA, AddressingMode::Implied),
             0x28 => Self::new(BaseInstruction::PLP, AddressingMode::Implied),
 
+            // RLA
+            0x27 => Self::new(BaseInstruction::RLA, AddressingMode::zero_page_val_addr()),
+            0x37 => Self::new(BaseInstruction::RLA, AddressingMode::zero_page_x_val_addr()),
+            0x2F => Self::new(BaseInstruction::RLA, AddressingMode::absolute_val_addr()),
+            0x3F => Self::new(BaseInstruction::RLA, AddressingMode::absolute_x_val_addr()),
+            0x3B => Self::new(BaseInstruction::RLA, AddressingMode::absolute_y_val_addr()),
+            0x23 => Self::new(BaseInstruction::RLA, AddressingMode::indexed_indirect_val_addr()),
+            0x33 => Self::new(BaseInstruction::RLA, AddressingMode::indirect_indexed_val_addr()),
+
+            // RRA
+            0x67 => Self::new(BaseInstruction::RRA, AddressingMode::zero_page_val_addr()),
+            0x77 => Self::new(BaseInstruction::RRA, AddressingMode::zero_page_x_val_addr()),
+            0x6F => Self::new(BaseInstruction::RRA, AddressingMode::absolute_val_addr()),
+            0x7F => Self::new(BaseInstruction::RRA, AddressingMode::absolute_x_val_addr()),
+            0x7B => Self::new(BaseInstruction::RRA, AddressingMode::absolute_y_val_addr()),
+            0x63 => Self::new(BaseInstruction::RRA, AddressingMode::indexed_indirect_val_addr()),
+            0x73 => Self::new(BaseInstruction::RRA, AddressingMode::indirect_indexed_val_addr()),
+
             // ROL
             0x26 => Self::new(BaseInstruction::ROL, AddressingMode::zero_page_val_addr()),
             0x2A => Self::new(BaseInstruction::ROL, AddressingMode::Accumulator),
@@ -267,6 +310,24 @@ impl Instruction {
             0x38 => Self::new(BaseInstruction::SEC, AddressingMode::Implied),
             0xF8 => Self::new(BaseInstruction::SED, AddressingMode::Implied),
             0x78 => Self::new(BaseInstruction::SEI, AddressingMode::Implied),
+
+            // SLO
+            0x07 => Self::new(BaseInstruction::SLO, AddressingMode::zero_page_val_addr()),
+            0x17 => Self::new(BaseInstruction::SLO, AddressingMode::zero_page_x_val_addr()),
+            0x0F => Self::new(BaseInstruction::SLO, AddressingMode::absolute_val_addr()),
+            0x1F => Self::new(BaseInstruction::SLO, AddressingMode::absolute_x_val_addr()),
+            0x1B => Self::new(BaseInstruction::SLO, AddressingMode::absolute_y_val_addr()),
+            0x03 => Self::new(BaseInstruction::SLO, AddressingMode::indexed_indirect_val_addr()),
+            0x13 => Self::new(BaseInstruction::SLO, AddressingMode::indirect_indexed_val_addr()),
+
+            // SRE
+            0x47 => Self::new(BaseInstruction::SRE, AddressingMode::zero_page_val_addr()),
+            0x57 => Self::new(BaseInstruction::SRE, AddressingMode::zero_page_x_val_addr()),
+            0x4F => Self::new(BaseInstruction::SRE, AddressingMode::absolute_val_addr()),
+            0x5F => Self::new(BaseInstruction::SRE, AddressingMode::absolute_x_val_addr()),
+            0x5B => Self::new(BaseInstruction::SRE, AddressingMode::absolute_y_val_addr()),
+            0x43 => Self::new(BaseInstruction::SRE, AddressingMode::indexed_indirect_val_addr()),
+            0x53 => Self::new(BaseInstruction::SRE, AddressingMode::indirect_indexed_val_addr()),
 
             // STA
             0x85 => Self::new(BaseInstruction::STA, AddressingMode::zero_page_addr()),
@@ -395,8 +456,12 @@ pub(crate) enum BaseInstruction {
     AAC, // Unofficial
     AAX, 
     ADC,
+    ALR,
     AND,
+    ARR,
     ASL,
+    ATX,
+    AXS,
     BCC(i8),
     BCS(i8),
     BEQ(i8),
@@ -416,6 +481,7 @@ pub(crate) enum BaseInstruction {
     CPX,
     CPY,
 
+    DCP,
     DEC,
     DEX,
     DEY,
@@ -424,6 +490,8 @@ pub(crate) enum BaseInstruction {
     INC,
     INX,
     INY,
+
+    ISC, // Increment then SBC value
 
     JMP,
     JSR(u8),
@@ -439,6 +507,10 @@ pub(crate) enum BaseInstruction {
     PHP,
     PLA,
     PLP,
+
+    RLA,
+    RRA,
+    
     ROL,
     ROR,
     RTI(u8),
@@ -448,6 +520,10 @@ pub(crate) enum BaseInstruction {
     SEC,
     SED,
     SEI,
+
+    SLO,
+    SRE,
+    
     STA,
     STX,
     STY,
@@ -487,9 +563,6 @@ impl BaseInstruction {
                 if let Address(address) = addr_result {
                     let value = cpu.accumulator & cpu.x;
                     cpu.memory.write_u8(address, value);
-
-                    cpu.zero_flag = value == 0;
-                    cpu.negative_flag = value >= 128;
 
                     cpu.instr_cycle = 0;
                 } else {
@@ -542,6 +615,40 @@ impl BaseInstruction {
                     unreachable!();
                 }
             }
+            BaseInstruction::ALR => {
+                if let Value(m) = addr_result {
+                    let and_res = cpu.accumulator & m;
+
+                    let res = shift_right(and_res);
+                    cpu.accumulator = res.result;
+                    cpu.carry_flag = res.carry_flag;
+                    cpu.zero_flag = res.zero_flag;
+                    cpu.negative_flag = res.negative_flag;
+
+                    cpu.instr_cycle = 0;
+                } else {
+                    unreachable!();
+                }
+            }
+            BaseInstruction::ARR => {
+                if let Value(m) = addr_result {
+                    let value = cpu.accumulator & m;
+
+                    let res = rotate_right(value, cpu.carry_flag);
+                    cpu.accumulator = res.result;
+                    cpu.zero_flag = res.zero_flag;
+                    cpu.negative_flag = res.negative_flag;
+
+                    let bit6 = (res.result & 0b01000000) != 0;
+                    let bit5 = (res.result & 0b00100000) != 0;
+                    cpu.carry_flag = bit6;
+                    cpu.overflow_flag = bit6 ^ bit5;
+
+                    cpu.instr_cycle = 0;
+                } else {
+                    unreachable!();
+                }
+            }
             BaseInstruction::ASL => {
                 let res = match addr_result {
                     Value(m) => {
@@ -561,6 +668,35 @@ impl BaseInstruction {
                 cpu.negative_flag = res.negative_flag;
 
                 cpu.instr_cycle = 0;
+            }
+            BaseInstruction::ATX => {
+                if let Value(m) = addr_result {
+                    let value = cpu.accumulator & m;
+
+                    cpu.accumulator = value;
+                    cpu.x = value;
+                    cpu.zero_flag = value == 0;
+                    cpu.negative_flag = value >= 128;
+
+                    cpu.instr_cycle = 0;
+                } else {
+                    unreachable!();
+                }
+            }
+            BaseInstruction::AXS => {
+                if let Value(m) = addr_result {
+                    let value = cpu.accumulator & cpu.x;
+
+                    let res = subtract_with_carry(value, m, true);
+                    cpu.x = res.result;
+                    cpu.zero_flag = res.zero_flag;
+                    cpu.negative_flag = res.negative_flag;
+                    cpu.carry_flag = res.carry_flag;
+
+                    cpu.instr_cycle = 0;
+                } else {
+                    unreachable!();
+                }
             }
             BaseInstruction::BCC(delta) => {
                 branch_if_condition!(cpu.carry_flag == false, cpu, delta, addr_result)
@@ -707,6 +843,23 @@ impl BaseInstruction {
                     unreachable!();
                 }
             }
+            BaseInstruction::DCP => {
+                if let ValueAddress(value, address) = addr_result {
+                    // TODO: check this
+                    let res = subtract_with_carry(value, 1, true);
+                    cpu.memory.write_u8(address, res.result);
+
+                    //cpu.carry_flag = res.carry_flag;
+                    let cmp_res = compare_u8(cpu.accumulator, res.result);
+                    cpu.carry_flag = cmp_res.carry;
+                    cpu.negative_flag = cmp_res.neg;
+                    cpu.zero_flag = cmp_res.zero;
+
+                    cpu.instr_cycle = 0;
+                } else {
+                    unreachable!();
+                }
+            }
             BaseInstruction::DEC => {
                 if let ValueAddress(value, address) = addr_result {
                     let value = value.wrapping_sub(1);
@@ -794,6 +947,24 @@ impl BaseInstruction {
                 cpu.negative_flag = cpu.y >= 128u8;
 
                 cpu.instr_cycle = 0;
+            }
+            BaseInstruction::ISC => {
+                if let ValueAddress(value, address) = addr_result {
+                    let value = value.wrapping_add(1);
+                    cpu.memory.write_u8(address, value);
+
+                    let res = subtract_with_carry(cpu.accumulator, value, cpu.carry_flag);
+
+                    cpu.accumulator = res.result;
+                    cpu.carry_flag = res.carry_flag;
+                    cpu.zero_flag = res.zero_flag;
+                    cpu.overflow_flag = res.overflow_flag;
+                    cpu.negative_flag = res.negative_flag;                    
+
+                    cpu.instr_cycle = 0;
+                } else {
+                    unreachable!();
+                }
             }
             BaseInstruction::LAX => {
                 if let Value(m) = addr_result {
@@ -927,8 +1098,11 @@ impl BaseInstruction {
             BaseInstruction::PHP => match addr_result {
                 Implied(_) => {}
                 Done => {
+                    let status = cpu.get_processor_status();
+                    // TODO: check this
+                    let status = status | 16; // Break flag
                     cpu.memory
-                        .write_u8(cpu.stack_address(), cpu.get_processor_status());
+                        .write_u8(cpu.stack_address(), status);
                     cpu.decrement_stack_pointer();
 
                     cpu.instr_cycle = 0;
@@ -962,7 +1136,9 @@ impl BaseInstruction {
                         cpu.increment_stack_pointer();
                     }
                     4 => {
-                        cpu.set_processor_status(cpu.memory.read_u8(cpu.stack_address()));
+                        let status = cpu.memory.read_u8(cpu.stack_address());
+                        let status = status & 0b11101111;
+                        cpu.set_processor_status(status);
 
                         cpu.instr_cycle = 0;
                     }
@@ -970,6 +1146,41 @@ impl BaseInstruction {
                 },
                 _ => unreachable!(),
             },
+            BaseInstruction::RLA => {
+                if let ValueAddress(value, address) = addr_result {
+                    let res = rotate_left(value, cpu.carry_flag);
+                    cpu.memory.write_u8(address, res.result);
+
+                    cpu.carry_flag = res.carry_flag;
+
+                    let acc = cpu.accumulator & res.result;
+
+                    cpu.accumulator = acc;
+                    cpu.zero_flag = acc == 0;
+                    cpu.negative_flag = acc >= 128u8;
+
+                    cpu.instr_cycle = 0;
+                } else {
+                    unreachable!();
+                }
+            }
+            BaseInstruction::RRA => {
+                if let ValueAddress(value, address) = addr_result {
+                    let ror_res = rotate_right(value, cpu.carry_flag);
+                    cpu.memory.write_u8(address, ror_res.result);
+
+                    let adc_res = add_with_carry(cpu.accumulator, ror_res.result, ror_res.carry_flag);
+                    cpu.accumulator = adc_res.result;
+                    cpu.carry_flag = adc_res.carry_flag;
+                    cpu.zero_flag = adc_res.zero_flag;
+                    cpu.negative_flag = adc_res.negative_flag;
+                    cpu.overflow_flag = adc_res.overflow_flag;
+
+                    cpu.instr_cycle = 0;
+                } else {
+                    unreachable!();
+                }
+            }
             BaseInstruction::ROL => {
                 let res = match addr_result {
                     Value(m) => {
@@ -1031,7 +1242,6 @@ impl BaseInstruction {
                         let pch = cpu
                             .memory
                             .read_u8(cpu.stack_pointer as u16 + cpu::addresses::STACK);
-                        println!("return address: {:#06x}", merge_u16(*pcl, pch));
                         cpu.program_counter = merge_u16(*pcl, pch);
 
                         cpu.instr_cycle = 0;
@@ -1129,6 +1339,42 @@ impl BaseInstruction {
                 cpu.interrupt_disable = true;
 
                 cpu.instr_cycle = 0;
+            }
+            BaseInstruction::SLO => {
+                if let ValueAddress(value, address) = addr_result {
+                    let res = shift_left(value);
+                    cpu.memory.write_u8(address, res.result);
+
+                    cpu.carry_flag = res.carry_flag;
+
+                    let acc = cpu.accumulator | res.result;
+
+                    cpu.accumulator = acc;
+                    cpu.zero_flag = acc == 0;
+                    cpu.negative_flag = acc >= 128u8;
+
+                    cpu.instr_cycle = 0;
+                } else {
+                    unreachable!();
+                }
+            }
+            BaseInstruction::SRE => {
+                if let ValueAddress(value, address) = addr_result {
+                    let res = shift_right(value);
+                    cpu.memory.write_u8(address, res.result);
+
+                    cpu.carry_flag = res.carry_flag;
+
+                    let acc = cpu.accumulator ^ res.result;
+
+                    cpu.accumulator = acc;
+                    cpu.zero_flag = acc == 0;
+                    cpu.negative_flag = acc >= 128u8;
+
+                    cpu.instr_cycle = 0;
+                } else {
+                    unreachable!();
+                }
             }
             BaseInstruction::STA => {
                 if let Address(address) = addr_result {

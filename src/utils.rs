@@ -54,6 +54,30 @@ pub(crate) fn add_with_carry(lhs: u8, rhs: u8, carry_in: bool) -> ADCSBCResult {
     }
 }
 
+pub(crate) fn subtract_with_carry(lhs: u8, rhs: u8, carry_in: bool) -> ADCSBCResult {
+    let (mut result, mut carry) = lhs.overflowing_sub(rhs);
+    let mut overflow_flag = (lhs ^ result) & (0u8.wrapping_sub(rhs) ^ result) & 0x80 != 0;
+
+    if carry_in == false {
+        let (acc2, carry2) = result.overflowing_sub(1);
+        overflow_flag = overflow_flag | ((result ^ acc2) & (128 ^ acc2) & 0x80 != 0);
+        result = acc2;
+        carry = carry || carry2;
+    }
+
+    let carry_flag = !carry;
+    let zero_flag = result == 0;
+    let negative_flag = result >= 128u8;
+
+    ADCSBCResult {
+        result,
+        carry_flag,
+        overflow_flag,
+        zero_flag,
+        negative_flag,
+    }
+}
+
 #[derive(PartialEq)]
 pub(crate) struct RotateResult {
     pub(crate) result: u8,
@@ -132,34 +156,6 @@ pub(crate) fn shift_right(val: u8) -> RotateResult {
     RotateResult {
         result: res,
         carry_flag,
-        zero_flag,
-        negative_flag,
-    }
-}
-
-pub(crate) fn subtract_with_carry(lhs: u8, rhs: u8, carry_in: bool) -> ADCSBCResult {
-    //let old_sign = lhs & 128;
-    let (mut result, mut carry) = lhs.overflowing_sub(rhs);
-    if carry_in == false {
-        let (acc2, carry2) = result.overflowing_sub(1);
-        result = acc2;
-        carry = carry || carry2;
-    }
-
-    let carry_flag = !carry;
-    let zero_flag = result == 0;
-
-    // TODO: check if set overflow flag correctly
-    let overflow_flag = (lhs ^ result) & (0u8.wrapping_sub(rhs) ^ result) & 0x80 != 0;
-    //let new_sign = result & 128;
-    //let overflow_flag = old_sign != new_sign;
-
-    let negative_flag = result >= 128u8;
-
-    ADCSBCResult {
-        result,
-        carry_flag,
-        overflow_flag,
         zero_flag,
         negative_flag,
     }
@@ -788,6 +784,21 @@ mod tests {
                 carry_flag: true,
                 overflow_flag: false,
                 negative_flag: true,
+                zero_flag: false,
+            }
+        );
+    }
+
+    #[test]
+    fn sbc_subrtract_zero() {
+        let res = subtract_with_carry(128, 0, false);
+        assert_eq!(
+            res,
+            ADCSBCResult {
+                result: 127,
+                carry_flag: true,
+                overflow_flag: true,
+                negative_flag: false,
                 zero_flag: false,
             }
         );

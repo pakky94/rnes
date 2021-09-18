@@ -79,6 +79,11 @@ pub(crate) enum AddressingMode {
         low_addr: u8,
         high_addr: u8,
     },
+    AbsoluteYValAddr {
+        low_addr: u8,
+        high_addr: u8,
+        value: u8,
+    },
     Indirect {
         low_addr: u8,
         high_addr: u8,
@@ -94,6 +99,12 @@ pub(crate) enum AddressingMode {
         low_addr: u8,
         high_addr: u8,
     },
+    IndexedIndirectValAddr {
+        pointer: u8,
+        low_addr: u8,
+        high_addr: u8,
+        value: u8,
+    },
     IndirectIndexedAddr {
         pointer: u8,
         low_addr: u8,
@@ -104,6 +115,13 @@ pub(crate) enum AddressingMode {
         pointer: u8,
         low_addr: u8,
         high_addr: u8,
+    },
+    IndirectIndexedValAddr {
+        pointer: u8,
+        low_addr: u8,
+        high_addr: u8,
+        page_crossed: bool,
+        value: u8,
     },
 }
 
@@ -161,6 +179,13 @@ impl AddressingMode {
         Self::AbsoluteYVal {
             low_addr: 0,
             high_addr: 0,
+        }
+    }
+    pub(crate) fn absolute_y_val_addr() -> Self {
+        Self::AbsoluteYValAddr {
+            low_addr: 0,
+            high_addr: 0,
+            value: 0,
         }
     }
     pub(crate) fn indirect() -> Self {
@@ -227,6 +252,14 @@ impl AddressingMode {
             high_addr: 0,
         }
     }
+    pub(crate) fn indexed_indirect_val_addr() -> Self {
+        AddressingMode::IndexedIndirectValAddr {
+            pointer: 0,
+            low_addr: 0,
+            high_addr: 0,
+            value: 0,
+        }
+    }
     pub(crate) fn indirect_indexed_addr() -> Self {
         AddressingMode::IndirectIndexedAddr {
             pointer: 0,
@@ -242,14 +275,21 @@ impl AddressingMode {
             high_addr: 0,
         }
     }
+    pub(crate) fn indirect_indexed_val_addr() -> Self {
+        AddressingMode::IndirectIndexedValAddr {
+            pointer: 0,
+            low_addr: 0,
+            high_addr: 0,
+            page_crossed: false,
+            value: 0,
+        }
+    }
 }
 
 impl AddressingMode {
     pub(crate) fn tick(cpu: &mut Cpu) -> AddressingResult {
         match &mut cpu.current_instr.addressing_mode {
-            AddressingMode::Implied => {
-                Implied(cpu.memory.read_u8(cpu.program_counter))
-            }
+            AddressingMode::Implied => Implied(cpu.memory.read_u8(cpu.program_counter)),
             AddressingMode::Accumulator => {
                 cpu.memory.read_u8(cpu.program_counter);
                 Value(cpu.accumulator)
@@ -672,6 +712,49 @@ impl AddressingMode {
                 }
                 _ => unreachable!(),
             },
+            AddressingMode::AbsoluteYValAddr {
+                low_addr,
+                high_addr,
+                value,
+            } => match cpu.instr_cycle {
+                2 => {
+                    *low_addr = cpu.memory.read_u8(cpu.program_counter);
+                    cpu.program_counter += 1;
+                    NotDone
+                }
+                3 => {
+                    *high_addr = cpu.memory.read_u8(cpu.program_counter);
+                    cpu.program_counter += 1;
+                    NotDone
+                }
+                4 => {
+                    let low_addr_fixed = low_addr.wrapping_add(cpu.y);
+                    let address = (*high_addr as u16) << 8 | (low_addr_fixed as u16);
+
+                    let _ = cpu.memory.read_u8(address);
+                    NotDone
+                }
+                5 => {
+                    let (low_addr_fixed, page_crossed) = low_addr.overflowing_add(cpu.y);
+                    *low_addr = low_addr_fixed;
+                    if page_crossed {
+                        *high_addr = high_addr.wrapping_add(1);
+                    }
+                    let address = (*high_addr as u16) << 8 | (*low_addr as u16);
+                    *value = cpu.memory.read_u8(address);
+                    NotDone
+                }
+                6 => {
+                    let address = (*high_addr as u16) << 8 | (*low_addr as u16);
+                    cpu.memory.write_u8(address as u16, *value);
+                    NotDone
+                }
+                7 => {
+                    let address = (*high_addr as u16) << 8 | (*low_addr as u16);
+                    ValueAddress(*value, address)
+                }
+                _ => unreachable!(),
+            },
             AddressingMode::Indirect {
                 low_addr,
                 high_addr,
@@ -760,6 +843,46 @@ impl AddressingMode {
                 }
                 _ => unreachable!(),
             },
+            AddressingMode::IndexedIndirectValAddr {
+                pointer,
+                low_addr,
+                high_addr,
+                value,
+            } => match cpu.instr_cycle {
+                2 => {
+                    *pointer = cpu.memory.read_u8(cpu.program_counter);
+                    cpu.program_counter += 1;
+                    NotDone
+                }
+                3 => {
+                    let _ = cpu.memory.read_u8(*pointer as u16);
+                    *pointer = pointer.wrapping_add(cpu.x);
+                    NotDone
+                }
+                4 => {
+                    *low_addr = cpu.memory.read_u8(*pointer as u16);
+                    NotDone
+                }
+                5 => {
+                    *high_addr = cpu.memory.read_u8(pointer.wrapping_add(1) as u16);
+                    NotDone
+                }
+                6 => {
+                    let address = (*high_addr as u16) << 8 | (*low_addr as u16);
+                    *value = cpu.memory.read_u8(address);
+                    NotDone
+                }
+                7 => {
+                    let address = (*high_addr as u16) << 8 | (*low_addr as u16);
+                    cpu.memory.write_u8(address, *value);
+                    NotDone
+                }
+                8 => {
+                    let address = (*high_addr as u16) << 8 | (*low_addr as u16);
+                    ValueAddress(*value, address)
+                }
+                _ => unreachable!(),
+            },
             AddressingMode::IndirectIndexedAddr {
                 pointer,
                 low_addr,
@@ -831,6 +954,53 @@ impl AddressingMode {
                     // Page boundary was crossed, read from fixed address
                     let address = (*high_addr as u16 + 1) << 8 | (*low_addr as u16);
                     Value(cpu.memory.read_u8(address))
+                }
+                _ => unreachable!(),
+            },
+            AddressingMode::IndirectIndexedValAddr {
+                pointer,
+                low_addr,
+                high_addr,
+                page_crossed,
+                value,
+            } => match cpu.instr_cycle {
+                2 => {
+                    *pointer = cpu.memory.read_u8(cpu.program_counter);
+                    cpu.program_counter += 1;
+                    NotDone
+                }
+                3 => {
+                    *low_addr = cpu.memory.read_u8(*pointer as u16);
+                    NotDone
+                }
+                4 => {
+                    *high_addr = cpu.memory.read_u8(pointer.wrapping_add(1) as u16);
+                    NotDone
+                }
+                5 => {
+                    let (low_addr_fixed, overflow) = low_addr.overflowing_add(cpu.y);
+                    let address = (*high_addr as u16) << 8 | (low_addr_fixed as u16);
+                    let _ = cpu.memory.read_u8(address);
+                    *page_crossed = overflow;
+                    *low_addr = low_addr_fixed;
+                    NotDone
+                }
+                6 => {
+                    if *page_crossed {
+                        *high_addr = high_addr.wrapping_add(1);
+                    };
+                    let address = merge_u16(*low_addr, *high_addr);
+                    *value = cpu.memory.read_u8(address);
+                    NotDone
+                }
+                7 => {
+                    let address = merge_u16(*low_addr, *high_addr);
+                    let _ = cpu.memory.read_u8(address);
+                    NotDone
+                }
+                8 => {
+                    let address = merge_u16(*low_addr, *high_addr);
+                    ValueAddress(*value, address)
                 }
                 _ => unreachable!(),
             },

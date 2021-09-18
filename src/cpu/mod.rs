@@ -158,7 +158,7 @@ impl Cpu {
             self.program_counter,
             self.memory.read_u8(self.program_counter)
         );
-        self.stack_pointer = 0xFD;
+        self.stack_pointer = self.stack_pointer.wrapping_sub(3);
         // TODO: initialize state
         self.reset_processor_status();
     }
