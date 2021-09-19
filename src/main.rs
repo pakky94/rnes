@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use rnes::cartridge::Cartridge;
 use rnes::{cpu, roms};
 
 fn main() {
@@ -7,8 +8,8 @@ fn main() {
 
     //println!("{}", 227 & 128 == 128);
 
-    run_official_only();
-    //sdl2_test().unwrap();
+    //run_official_only();
+    run_emulator().unwrap();
 }
 
 fn run_official_only() {
@@ -41,23 +42,23 @@ fn run_official_only() {
             //let mut j = 0x6004;
             //let mut b = cpu.peek(j);
             //for _ in 0..1000 {
-                //j += 1;
-                //buffer.push(b);
-                //b = cpu.peek(j);
+            //j += 1;
+            //buffer.push(b);
+            //b = cpu.peek(j);
             //}
             //let s = String::from_utf8(buffer).unwrap();
             //println!("{}", s);
         }
 
         //if cpu.get_cycles() > 3600 {
-            //for i in 0..0xFF {
-                //let a: u16 = 0x0700 + i;
-                //println!("{:#06x}: {:#04x}", a, cpu.peek(a));
-            //}
-            //panic!();
+        //for i in 0..0xFF {
+        //let a: u16 = 0x0700 + i;
+        //println!("{:#06x}: {:#04x}", a, cpu.peek(a));
+        //}
+        //panic!();
         //}
         //if i == 220000 {
-            //panic!();
+        //panic!();
         //}
 
         i += 1;
@@ -85,7 +86,7 @@ fn run_official_only() {
             let s = String::from_utf8_lossy(&buffer);
             println!("{}", s);
             i = 0;
-            std::thread::sleep(std::time::Duration::from_millis(100));
+            //std::thread::sleep(std::time::Duration::from_millis(100));
         }
     }
 }
@@ -100,6 +101,7 @@ use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use sdl2::render::TextureQuery;
+use sdl2::surface::Surface;
 use std::time::Duration;
 
 // handle the annoying Rect i32
@@ -133,13 +135,19 @@ fn get_centered_rect(rect_width: u32, rect_height: u32, cons_width: u32, cons_he
     rect!(cx, cy, w, h)
 }
 
-fn sdl2_test() -> Result<(), String> {
+fn get_cartridge() -> Cartridge {
+    let path = "Super Mario Bros.nes";
+    let cartridge = roms::read_rom(path);
+    cartridge
+}
+
+fn run_emulator() -> Result<(), String> {
     let sdl_context = sdl2::init().unwrap();
     let ttf_context = sdl2::ttf::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
 
     let window = video_subsystem
-        .window("rust-sdl2 demo", 800, 600)
+        .window("rust-sdl2 demo", SCREEN_WIDTH, SCREEN_HEIGHT)
         .position_centered()
         .build()
         .unwrap();
@@ -149,6 +157,9 @@ fn sdl2_test() -> Result<(), String> {
     let mut canvas = window.into_canvas().build().unwrap();
 
     let texture_creator = canvas.texture_creator();
+
+    let cartridge = get_cartridge();
+    let mut nes = rnes::Nes::with_cartridge(cartridge);
 
     canvas.set_draw_color(Color::RGB(0, 255, 255));
     canvas.clear();
@@ -170,6 +181,21 @@ fn sdl2_test() -> Result<(), String> {
             }
         }
         // The rest of the game loop goes here...
+        nes.run_until_frame();
+        let mut frame = nes.get_frame();
+        let game_render = Surface::from_data(
+            frame.get_data(),
+            256,
+            224,
+            256 * 4,
+            sdl2::pixels::PixelFormatEnum::RGBA8888,
+        )?
+            .as_texture(&texture_creator)
+            .map_err(|e| e.to_string())?;
+        
+        canvas.copy(&game_render, None, Some(Rect::new(0, 0, 512, 448)))?;
+        nes.return_frame(frame);
+        
         let surface = font
             .render("Hello Rust!")
             .blended(Color::RGBA(255, 255, 255, 255))
@@ -188,6 +214,7 @@ fn sdl2_test() -> Result<(), String> {
         );
 
         canvas.copy(&texture, None, Some(target))?;
+
 
         canvas.present();
         ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));

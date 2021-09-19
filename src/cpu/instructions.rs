@@ -76,7 +76,7 @@ impl Instruction {
             0x1E => Self::new(BaseInstruction::ASL, AddressingMode::absolute_x_val_addr()),
 
             // ATX
-            0xAB => Self::new(BaseInstruction::ATX, AddressingMode::Immediate),
+            0xAB => Self::new(BaseInstruction::LAX, AddressingMode::Immediate),
 
             // AXS
             0xCB => Self::new(BaseInstruction::AXS, AddressingMode::Immediate),
@@ -460,7 +460,7 @@ pub(crate) enum BaseInstruction {
     AND,
     ARR,
     ASL,
-    ATX,
+    //ATX,
     AXS,
     BCC(i8),
     BCS(i8),
@@ -669,20 +669,20 @@ impl BaseInstruction {
 
                 cpu.instr_cycle = 0;
             }
-            BaseInstruction::ATX => {
-                if let Value(m) = addr_result {
-                    let value = cpu.accumulator & m;
-
-                    cpu.accumulator = value;
-                    cpu.x = value;
-                    cpu.zero_flag = value == 0;
-                    cpu.negative_flag = value >= 128;
-
-                    cpu.instr_cycle = 0;
-                } else {
-                    unreachable!();
-                }
-            }
+            //BaseInstruction::ATX => {
+                //if let Value(m) = addr_result {
+                    //let value = cpu.accumulator & m;
+//
+                    //cpu.accumulator = value;
+                    //cpu.x = value;
+                    //cpu.zero_flag = value == 0;
+                    //cpu.negative_flag = value >= 128;
+//
+                    //cpu.instr_cycle = 0;
+                //} else {
+                    //unreachable!();
+                //}
+            //}
             BaseInstruction::AXS => {
                 if let Value(m) = addr_result {
                     let value = cpu.accumulator & cpu.x;
@@ -1229,7 +1229,8 @@ impl BaseInstruction {
                         cpu.increment_stack_pointer();
                     }
                     4 => {
-                        cpu.set_processor_status(cpu.memory.read_u8(cpu.stack_address()));
+                        let val = cpu.memory.read_u8(cpu.stack_address());
+                        cpu.set_processor_status(val);
                         cpu.increment_stack_pointer();
                     }
                     5 => {
@@ -1467,8 +1468,10 @@ impl BaseInstruction {
                 }
                 let s = String::from_utf8(buffer).unwrap();
                 println!("{}", s);
-                cpu.logger.print_log();
-                cpu.logger.write_log("out.txt");
+                if cpu.logger.is_logging() {
+                    cpu.logger.print_log();
+                    cpu.logger.write_log("out.txt");
+                }
                 panic!();
             }
         }

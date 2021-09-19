@@ -3,11 +3,15 @@ mod instructions;
 mod logger;
 pub use logger::Logger;
 
-use crate::Cartridge;
+use crate::ppu::PpuIoRegisters;
+use crate::{
+    bus::{BusAction, PpuAction},
+    Cartridge,
+};
 pub(crate) use addressing_mode::{AddressingMode, AddressingResult};
 use instructions::Instruction;
 
-use self::addresses::PRG_ROM_LOWER;
+use self::addresses::{EXPANSION_ROM, IO_REGISTERS_START, PRG_ROM_LOWER};
 
 mod addresses {
     pub(crate) const ZERO_PAGE_START: u16 = 0x0000;
@@ -27,6 +31,8 @@ struct Memory {
     // memory: [u8; 2 ^ 16],
     memory: Vec<u8>,
     cartridge: Cartridge,
+    bus_action: BusAction,
+    ppu_io_registers: PpuIoRegisters,
 }
 
 impl Memory {
@@ -35,6 +41,8 @@ impl Memory {
             // memory: [0u8; 2 ^ 16],
             memory: vec![0x00; 0x10000],
             cartridge: Cartridge::empty(),
+            bus_action: BusAction::None,
+            ppu_io_registers: PpuIoRegisters::new(),
         }
     }
 
@@ -42,10 +50,12 @@ impl Memory {
         Self {
             memory: vec,
             cartridge: Cartridge::empty(),
+            bus_action: BusAction::None,
+            ppu_io_registers: PpuIoRegisters::new(),
         }
     }
 
-    pub(crate) fn read_u8(&self, address: u16) -> u8 {
+    pub(crate) fn read_unchanged_u8(&self, address: u16) -> u8 {
         let address = Self::unmirror_address(address);
 
         // if address < CARTRIDGE_SPACE {
@@ -56,18 +66,90 @@ impl Memory {
         }
     }
 
+    pub(crate) fn read_u8(&mut self, address: u16) -> u8 {
+        let address = Self::unmirror_address(address);
+
+        // if address < CARTRIDGE_SPACE {
+        if address < IO_REGISTERS_START {
+            self.memory[address as usize]
+        } else if address < EXPANSION_ROM {
+            // IO register stuff
+            if address < 0x4000 {
+                // mirrors of 0x2000-0x2008
+                let address = address % 8 + 0x2000;
+                match address {
+                    0x2002 => {
+                        // PPU STATUS
+                        self.bus_action = BusAction::PpuAction(PpuAction::PpuStatusRead);
+                        if self.ppu_io_registers.status != 0 {
+                            println!(
+                                "Reading from PPUSTATUS: {:08b}",
+                                self.ppu_io_registers.status
+                            );
+                        }
+                        self.ppu_io_registers.status
+                    }
+                    0x2004 => {
+                        // OAM data
+                        todo!()
+                    }
+                    0x2007 => {
+                        // Data
+                        todo!()
+                    }
+                    _ => unreachable!(),
+                }
+            } else {
+                // 0x4000-0x4020
+                todo!()
+            }
+        } else if address < PRG_ROM_LOWER {
+            self.memory[address as usize]
+        } else {
+            self.cartridge.read(address)
+        }
+    }
+
     fn write_u8(&mut self, address: u16, value: u8) {
         let address = Self::unmirror_address(address);
 
         // if address < CARTRIDGE_SPACE {
-        if address < PRG_ROM_LOWER {
+        if address < IO_REGISTERS_START {
+            self.memory[address as usize] = value;
+        } else if address < EXPANSION_ROM {
+            // IO register stuff
+            if address < 0x4000 {
+                // mirrors of 0x2000-0x2008
+                let address = address % 8 + 0x2000;
+                match address {
+                    0x2000 => {
+                        println!("Writing to PPUCTRL: {:08b}", value);
+                        self.bus_action = BusAction::PpuAction(PpuAction::PpuCtrlWrite(value));
+                    }
+                    0x2001 => {
+                        println!("Writing to PPUMASK: {:08b}", value);
+                        self.bus_action = BusAction::PpuAction(PpuAction::PpuMaskWrite(value));
+                    }
+                    0x2006 => {
+                        println!("Writing to PPUADDR: {:08b}", value);
+                        self.bus_action = BusAction::PpuAction(PpuAction::PpuAddrWrite(value))
+                    }
+                    _ => unreachable!(
+                        "Writing to PPU at address {:#06x} value: {:08b}",
+                        address, value
+                    ),
+                }
+            } else {
+                // 0x4000-0x4020
+            }
+        } else if address < PRG_ROM_LOWER {
             self.memory[address as usize] = value;
         } else {
             self.cartridge.write(address, value);
         }
     }
 
-    fn read_u16(&self, address: u16) -> u16 {
+    fn read_u16(&mut self, address: u16) -> u16 {
         let lower = self.read_u8(address);
         let higher = self.read_u8(address + 1);
         (higher as u16) << 8 | (lower as u16)
@@ -82,6 +164,16 @@ impl Memory {
         } else {
             address
         }
+    }
+
+    fn take_bus_action(&mut self) -> BusAction {
+        let bus_action = self.bus_action;
+        self.bus_action = BusAction::None;
+        bus_action
+    }
+
+    fn set_ppu_io_registers(&mut self, regs: PpuIoRegisters) {
+        self.ppu_io_registers = regs;
     }
 }
 
@@ -116,6 +208,7 @@ pub struct Cpu {
     current_instr: Instruction,
     instr_cycle: usize,
     pub logger: Logger,
+    pub(crate) bus_action: BusAction,
 }
 
 impl Cpu {
@@ -138,6 +231,7 @@ impl Cpu {
             current_instr: Instruction::no_op(),
             instr_cycle: 0,
             logger: Logger::new(),
+            bus_action: BusAction::None,
         }
     }
 
@@ -164,7 +258,7 @@ impl Cpu {
     }
 
     pub fn peek(&self, address: u16) -> u8 {
-        self.memory.read_u8(address)
+        self.memory.read_unchanged_u8(address)
     }
 
     pub fn get_acc(&self) -> u8 {
@@ -224,12 +318,17 @@ impl Cpu {
         }
         self.cycles += 1;
 
+        self.bus_action = self.memory.take_bus_action();
         self.memory.cartridge.tick();
     }
 
     pub(crate) fn pool_interrupts(&mut self) {
         // TODO: everithing
         //todo!()
+    }
+
+    pub(crate) fn set_ppu_io_registers(&mut self, regs: PpuIoRegisters) {
+        self.memory.set_ppu_io_registers(regs);
     }
 
     fn interrupt(&mut self) {
@@ -310,7 +409,7 @@ impl std::fmt::Debug for Cpu {
             f,
             "SP:  {:#04x}   value: {:#04x}\n",
             self.stack_pointer,
-            self.memory.read_u8(self.stack_address() + 1)
+            self.memory.read_unchanged_u8(self.stack_address() + 1)
         )?;
         write!(f, "Acc: {:#04x}\n", self.accumulator)?;
         write!(f, "X:   {:#04x}\n", self.x)?;

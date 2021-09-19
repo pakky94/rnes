@@ -27,23 +27,35 @@ pub(crate) struct ADCSBCResult {
     pub(crate) negative_flag: bool,
 }
 pub(crate) fn add_with_carry(lhs: u8, rhs: u8, carry_in: bool) -> ADCSBCResult {
-    //let old_sign = lhs & 128;
     let (mut result, mut carry) = lhs.overflowing_add(rhs);
+    //let mut overflow_flag = (lhs ^ result) & (rhs ^ result) & 0x80 != 0;
+
     if carry_in {
         let (acc2, carry2) = result.overflowing_add(1);
+        //overflow_flag = overflow_flag | ((result ^ acc2) & (1 ^ acc2) & 0x80 != 0);
         result = acc2;
         carry = carry || carry2;
     }
 
     let carry_flag = carry;
     let zero_flag = result == 0;
-
-    // TODO: check if set overflow flag correctly
-    let overflow_flag = (lhs ^ result) & (rhs ^ result) & 0x80 != 0;
-    //let new_sign = result & 128;
-    //let overflow_flag = old_sign != new_sign;
-
     let negative_flag = result >= 128u8;
+
+    let overflow_flag = {
+        let lhs = lhs & 127;
+        let rhs = rhs & 127;
+        let mut res = lhs.wrapping_add(rhs);
+        //let mut overflow_flag = (lhs ^ result) & (rhs ^ result) & 0x80 != 0;
+        
+        if carry_in {
+            res = res.wrapping_add(1);
+        }
+
+        let c6 = res & 128 == 128;
+        let c7 = carry_flag;
+
+        c6 ^ c7
+    };
 
     ADCSBCResult {
         result,
@@ -55,27 +67,28 @@ pub(crate) fn add_with_carry(lhs: u8, rhs: u8, carry_in: bool) -> ADCSBCResult {
 }
 
 pub(crate) fn subtract_with_carry(lhs: u8, rhs: u8, carry_in: bool) -> ADCSBCResult {
-    let (mut result, mut carry) = lhs.overflowing_sub(rhs);
-    let mut overflow_flag = (lhs ^ result) & (0u8.wrapping_sub(rhs) ^ result) & 0x80 != 0;
-
-    if carry_in == false {
-        let (acc2, carry2) = result.overflowing_sub(1);
-        overflow_flag = overflow_flag | ((result ^ acc2) & (128 ^ acc2) & 0x80 != 0);
-        result = acc2;
-        carry = carry || carry2;
-    }
-
-    let carry_flag = !carry;
-    let zero_flag = result == 0;
-    let negative_flag = result >= 128u8;
-
-    ADCSBCResult {
-        result,
-        carry_flag,
-        overflow_flag,
-        zero_flag,
-        negative_flag,
-    }
+    add_with_carry(lhs, !rhs, carry_in)
+    //let (mut result, mut carry) = lhs.overflowing_sub(rhs);
+    //let mut overflow_flag = (lhs ^ result) & (!rhs ^ result) & 0x80 != 0;
+    //
+    //if carry_in == false {
+    //let (acc2, carry2) = result.overflowing_sub(1);
+    //overflow_flag = overflow_flag | ((result ^ acc2) & (255 ^ acc2) & 0x80 != 0);
+    //result = acc2;
+    //carry = carry || carry2;
+    //}
+    //
+    //let carry_flag = !carry;
+    //let zero_flag = result == 0;
+    //let negative_flag = result >= 128u8;
+    //
+    //ADCSBCResult {
+    //result,
+    //carry_flag,
+    //overflow_flag,
+    //zero_flag,
+    //negative_flag,
+    //}
 }
 
 #[derive(PartialEq)]
