@@ -67,6 +67,14 @@ impl Mapper for MMC1 {
             self.written_last_cycle = 0;
         }
     }
+
+    fn ppu_read(&self, _address: u16, _internal_vram: &[u8; 0x800]) -> u8 {
+        todo!()
+    }
+
+    fn ppu_write(&mut self, _address: u16, _value: u8, _internal_vram: &mut [u8; 0x800]) {
+        todo!()
+    }
 }
 
 impl MMC1 {

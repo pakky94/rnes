@@ -15,6 +15,13 @@ impl Cartridge {
         let mapper_high = header[7] & 248; // 4 highest bits
         let mapper = mapper_high | mapper_low;
 
+        let mirroring_bit = header[6] & 1;
+        let mirroring = if mirroring_bit == 0 {
+            mappers::Mirroring::Horizontal
+        } else {
+            mappers::Mirroring::Vertical
+        };
+
         let prg_rom_banks = header[4];
         let chr_rom_banks = header[5];
 
@@ -66,6 +73,7 @@ impl Cartridge {
                             } else {
                                 [0u8; 0x2000]
                             },
+                            mirroring,
                         )),
                     }
                 } else {
@@ -78,6 +86,7 @@ impl Cartridge {
                             } else {
                                 [0u8; 0x2000]
                             },
+                            mirroring,
                         )),
                     }
                 }
@@ -101,12 +110,17 @@ impl Cartridge {
         }
     }
 
-    pub(crate) fn read(&self, address: u16) -> u8 {
+    pub(crate) fn cpu_read(&self, address: u16) -> u8 {
         self.mapper.read(address)
     }
-
-    pub(crate) fn write(&mut self, address: u16, value: u8) {
+    pub(crate) fn cpu_write(&mut self, address: u16, value: u8) {
         self.mapper.write(address, value)
+    }
+    pub(crate) fn ppu_read(&self, address: u16, internal_vram: &[u8; 0x800]) -> u8 {
+        self.mapper.ppu_read(address, internal_vram)
+    }
+    pub(crate) fn ppu_write(&mut self, address: u16, value: u8, internal_vram: &mut [u8; 0x800]) {
+        self.mapper.ppu_write(address, value, internal_vram)
     }
     pub(crate) fn tick(&mut self) {
         self.mapper.tick()

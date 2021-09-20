@@ -9,7 +9,7 @@ pub enum PpuAction {
     PpuCtrlWrite(u8),
     PpuMaskWrite(u8),
     PpuStatusRead,
-    OmaAddrWrite(u8),
+    OamAddrWrite(u8),
     OamDataWrite(u8),
     PpuScrollWrite(u8),
     PpuAddrWrite(u8),

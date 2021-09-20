@@ -1,19 +1,14 @@
 mod addressing_mode;
 mod instructions;
 mod logger;
+
 pub use logger::Logger;
 
-use crate::ppu::PpuIoRegisters;
-use crate::{
-    bus::{BusAction, PpuAction},
-    Cartridge,
-};
+use crate::{bus::BusAction, memory::CpuMemory};
 pub(crate) use addressing_mode::{AddressingMode, AddressingResult};
 use instructions::Instruction;
 
-use self::addresses::{EXPANSION_ROM, IO_REGISTERS_START, PRG_ROM_LOWER};
-
-mod addresses {
+pub(crate) mod addresses {
     pub(crate) const ZERO_PAGE_START: u16 = 0x0000;
     pub(crate) const STACK: u16 = 0x0100;
     pub(crate) const IO_REGISTERS_START: u16 = 0x2000;
@@ -25,156 +20,6 @@ mod addresses {
     pub(crate) const NMI_VECTOR: u16 = 0xFFFA;
     pub(crate) const RESET_VECTOR: u16 = 0xFFFC;
     pub(crate) const IRQ_BRK_VECTOR: u16 = 0xFFFE;
-}
-
-struct Memory {
-    // memory: [u8; 2 ^ 16],
-    memory: Vec<u8>,
-    cartridge: Cartridge,
-    bus_action: BusAction,
-    ppu_io_registers: PpuIoRegisters,
-}
-
-impl Memory {
-    fn new() -> Self {
-        Self {
-            // memory: [0u8; 2 ^ 16],
-            memory: vec![0x00; 0x10000],
-            cartridge: Cartridge::empty(),
-            bus_action: BusAction::None,
-            ppu_io_registers: PpuIoRegisters::new(),
-        }
-    }
-
-    fn from_vec(vec: Vec<u8>) -> Self {
-        Self {
-            memory: vec,
-            cartridge: Cartridge::empty(),
-            bus_action: BusAction::None,
-            ppu_io_registers: PpuIoRegisters::new(),
-        }
-    }
-
-    pub(crate) fn read_unchanged_u8(&self, address: u16) -> u8 {
-        let address = Self::unmirror_address(address);
-
-        // if address < CARTRIDGE_SPACE {
-        if address < PRG_ROM_LOWER {
-            self.memory[address as usize]
-        } else {
-            self.cartridge.read(address)
-        }
-    }
-
-    pub(crate) fn read_u8(&mut self, address: u16) -> u8 {
-        let address = Self::unmirror_address(address);
-
-        // if address < CARTRIDGE_SPACE {
-        if address < IO_REGISTERS_START {
-            self.memory[address as usize]
-        } else if address < EXPANSION_ROM {
-            // IO register stuff
-            if address < 0x4000 {
-                // mirrors of 0x2000-0x2008
-                let address = address % 8 + 0x2000;
-                match address {
-                    0x2002 => {
-                        // PPU STATUS
-                        self.bus_action = BusAction::PpuAction(PpuAction::PpuStatusRead);
-                        if self.ppu_io_registers.status != 0 {
-                            println!(
-                                "Reading from PPUSTATUS: {:08b}",
-                                self.ppu_io_registers.status
-                            );
-                        }
-                        self.ppu_io_registers.status
-                    }
-                    0x2004 => {
-                        // OAM data
-                        todo!()
-                    }
-                    0x2007 => {
-                        // Data
-                        todo!()
-                    }
-                    _ => unreachable!(),
-                }
-            } else {
-                // 0x4000-0x4020
-                todo!()
-            }
-        } else if address < PRG_ROM_LOWER {
-            self.memory[address as usize]
-        } else {
-            self.cartridge.read(address)
-        }
-    }
-
-    fn write_u8(&mut self, address: u16, value: u8) {
-        let address = Self::unmirror_address(address);
-
-        // if address < CARTRIDGE_SPACE {
-        if address < IO_REGISTERS_START {
-            self.memory[address as usize] = value;
-        } else if address < EXPANSION_ROM {
-            // IO register stuff
-            if address < 0x4000 {
-                // mirrors of 0x2000-0x2008
-                let address = address % 8 + 0x2000;
-                match address {
-                    0x2000 => {
-                        println!("Writing to PPUCTRL: {:08b}", value);
-                        self.bus_action = BusAction::PpuAction(PpuAction::PpuCtrlWrite(value));
-                    }
-                    0x2001 => {
-                        println!("Writing to PPUMASK: {:08b}", value);
-                        self.bus_action = BusAction::PpuAction(PpuAction::PpuMaskWrite(value));
-                    }
-                    0x2006 => {
-                        println!("Writing to PPUADDR: {:08b}", value);
-                        self.bus_action = BusAction::PpuAction(PpuAction::PpuAddrWrite(value))
-                    }
-                    _ => unreachable!(
-                        "Writing to PPU at address {:#06x} value: {:08b}",
-                        address, value
-                    ),
-                }
-            } else {
-                // 0x4000-0x4020
-            }
-        } else if address < PRG_ROM_LOWER {
-            self.memory[address as usize] = value;
-        } else {
-            self.cartridge.write(address, value);
-        }
-    }
-
-    fn read_u16(&mut self, address: u16) -> u16 {
-        let lower = self.read_u8(address);
-        let higher = self.read_u8(address + 1);
-        (higher as u16) << 8 | (lower as u16)
-    }
-
-    fn unmirror_address(address: u16) -> u16 {
-        //return address;
-        if address < 0x2000 {
-            address % 0x0800
-        } else if address < 0x4000 {
-            (address % 0x0008) + 0x2000
-        } else {
-            address
-        }
-    }
-
-    fn take_bus_action(&mut self) -> BusAction {
-        let bus_action = self.bus_action;
-        self.bus_action = BusAction::None;
-        bus_action
-    }
-
-    fn set_ppu_io_registers(&mut self, regs: PpuIoRegisters) {
-        self.ppu_io_registers = regs;
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -203,16 +48,19 @@ pub struct Cpu {
     break_command: bool,
     overflow_flag: bool,
     negative_flag: bool,
-    cycles: usize,
-    memory: Memory,
+    pub(crate) cycles: usize,
+    memory: CpuMemory,
     current_instr: Instruction,
     instr_cycle: usize,
     pub logger: Logger,
     pub(crate) bus_action: BusAction,
+    pub(crate) nmi_flag: bool,
+    nmi: bool,
+    pub debug: usize,
 }
 
 impl Cpu {
-    pub fn new() -> Self {
+    pub fn new(memory: CpuMemory) -> Self {
         Self {
             program_counter: 0,
             stack_pointer: 0,
@@ -227,22 +75,15 @@ impl Cpu {
             overflow_flag: false,
             negative_flag: false,
             cycles: 0,
-            memory: Memory::new(),
+            memory,
             current_instr: Instruction::no_op(),
             instr_cycle: 0,
             logger: Logger::new(),
             bus_action: BusAction::None,
+            nmi_flag: false,
+            nmi: false,
+            debug: 0,
         }
-    }
-
-    pub fn with_memory(vec: Vec<u8>) -> Self {
-        let mut out = Self::new();
-        out.memory = Memory::from_vec(vec);
-        out
-    }
-
-    pub fn load_cartridge(&mut self, cartridge: Cartridge) {
-        self.memory.cartridge = cartridge;
     }
 
     pub fn init(&mut self) {
@@ -304,31 +145,44 @@ impl Cpu {
     }
 
     pub fn tick(&mut self) {
-        if self.instr_cycle == 0 {
-            let opcode = self.memory.read_u8(self.program_counter);
-            if self.logger.is_logging() {
-                self.logger.start_new_instr(self.program_counter, opcode);
-                self.logger.set_proc_status(self.get_cpu_status());
+        if !self.memory.try_dma() {
+            if self.instr_cycle == 0 {
+                if self.nmi {
+                    let _ = self.memory.read_u8(self.program_counter);
+                    self.current_instr = Instruction::from_opcode(0x00); // force BRK instruction
+                    // Don't increment PC
+                    self.instr_cycle = 2;
+                    
+                    self.nmi_flag = false;
+                } else {
+                    let opcode = self.memory.read_u8(self.program_counter);
+                    if self.logger.is_logging() {
+                        self.logger.start_new_instr(self.program_counter, opcode);
+                        self.logger.set_proc_status(self.get_cpu_status());
+                    }
+                    self.current_instr = Instruction::from_opcode(opcode);
+                    self.program_counter = self.program_counter.wrapping_add(1);
+                    self.instr_cycle = 2;
+                }
+            } else {
+                Instruction::tick(self);
             }
-            self.current_instr = Instruction::from_opcode(opcode);
-            self.program_counter = self.program_counter.wrapping_add(1);
-            self.instr_cycle = 2;
-        } else {
-            Instruction::tick(self);
         }
         self.cycles += 1;
 
         self.bus_action = self.memory.take_bus_action();
-        self.memory.cartridge.tick();
     }
 
     pub(crate) fn pool_interrupts(&mut self) {
         // TODO: everithing
-        //todo!()
-    }
-
-    pub(crate) fn set_ppu_io_registers(&mut self, regs: PpuIoRegisters) {
-        self.memory.set_ppu_io_registers(regs);
+        self.debug += 1;
+        if self.debug % 100000 == 0 {
+            println!("{}", self.debug);
+        }
+        if self.nmi_flag {
+            self.nmi = true;
+            println!("NMI triggered");
+        }
     }
 
     fn interrupt(&mut self) {
@@ -418,49 +272,5 @@ impl std::fmt::Debug for Cpu {
         write!(f, "flags {:#010b}\n", self.get_processor_status())?;
         write!(f, "        NV BDIZC\n")?;
         write!(f, "current instruction: {:?}\n", self.current_instr)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Cpu;
-
-    #[test]
-    fn get_status_register_value() {
-        let mut cpu = Cpu::new();
-
-        cpu.carry_flag = true;
-        cpu.zero_flag = false;
-        cpu.interrupt_disable = false;
-        cpu.decimal_mode = true;
-        cpu.break_command = true;
-        cpu.overflow_flag = false;
-        cpu.negative_flag = false;
-
-        assert_eq!(57, cpu.get_processor_status());
-
-        cpu.carry_flag = false;
-        cpu.zero_flag = true;
-        cpu.interrupt_disable = true;
-        cpu.decimal_mode = false;
-        cpu.break_command = false;
-        cpu.overflow_flag = true;
-        cpu.negative_flag = true;
-
-        assert_eq!(230, cpu.get_processor_status());
-    }
-
-    #[test]
-    fn set_status_register_value() {
-        let mut cpu = Cpu::new();
-        cpu.set_processor_status(0);
-        assert_eq!(32, cpu.get_processor_status());
-        cpu.set_processor_status(198);
-        assert_eq!(230, cpu.get_processor_status());
-        cpu.set_processor_status(77);
-        assert_eq!(109, cpu.get_processor_status());
-
-        cpu.set_processor_status(178);
-        assert_eq!(178, cpu.get_processor_status());
     }
 }
