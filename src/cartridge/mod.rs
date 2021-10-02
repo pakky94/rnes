@@ -23,7 +23,7 @@ impl Cartridge {
         };
 
         let prg_rom_banks = header[4];
-        let chr_rom_banks = header[5];
+        let chr_rom_banks = header[5] * 2; // Treat banks as 4k banks
 
         let mut prg_banks = Vec::new();
         let mut chr_banks = Vec::new();
@@ -39,9 +39,9 @@ impl Cartridge {
             prg_banks.push(buffer.clone());
         }
 
-        let mut buffer = [0u8; 0x2000];
+        let mut buffer = [0u8; 0x1000];
         for _ in 0..chr_rom_banks {
-            for i in 0..0x2000 {
+            for i in 0..0x1000 {
                 let b = data_iter.next().unwrap();
                 buffer[i] = b;
             }
@@ -63,13 +63,24 @@ impl Cartridge {
 
         match mapper {
             0 => {
+                let mut chr_bank = [0u8; 0x2000];
+                let mut i = 0;
+                for j in 0..0x1000 {
+                    chr_bank[i] = chr_banks[0][j];
+                    i += 1;
+                }
+                for j in 0..0x1000 {
+                    chr_bank[i] = chr_banks[1][j];
+                    i += 1;
+                }
+                
                 if prg_banks.len() == 1 {
                     Cartridge {
                         mapper: Box::new(mappers::NROM::new(
                             true,
                             [prg_banks[0], [0u8; 0x4000]],
                             if chr_rom_banks > 0 {
-                                chr_banks[0]
+                                chr_bank
                             } else {
                                 [0u8; 0x2000]
                             },
@@ -82,7 +93,7 @@ impl Cartridge {
                             false,
                             [prg_banks[0], prg_banks[1]],
                             if chr_rom_banks > 0 {
-                                chr_banks[0]
+                                chr_bank
                             } else {
                                 [0u8; 0x2000]
                             },
@@ -91,9 +102,19 @@ impl Cartridge {
                     }
                 }
             }
-            1 => Cartridge {
-                mapper: Box::new(mappers::MMC1::new(prg_banks)),
-            },
+            1 => {
+                
+                if chr_rom_banks == 0 {
+                    chr_banks = vec![[0u8; 0x1000]; 32];
+                    Cartridge {
+                        mapper: Box::new(mappers::MMC1::new(prg_banks, chr_banks)),
+                    }
+                } else {
+                    Cartridge {
+                        mapper: Box::new(mappers::MMC1::new(prg_banks, chr_banks)),
+                    }
+                }
+            }
             _ => unimplemented!("Unimplemented mapper {}", mapper),
         }
     }

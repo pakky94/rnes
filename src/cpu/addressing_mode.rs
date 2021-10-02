@@ -367,11 +367,13 @@ impl AddressingMode {
             } => match cpu.instr_cycle {
                 2 => {
                     *low_addr = cpu.memory.read_u8(cpu.program_counter);
+                    cpu.logger.add_data_to_last_instr(*low_addr);
                     cpu.program_counter += 1;
                     NotDone
                 }
                 3 => {
                     *high_addr = cpu.memory.read_u8(cpu.program_counter);
+                    cpu.logger.add_data_to_last_instr(*high_addr);
                     cpu.program_counter += 1;
                     NotDone
                 }
@@ -532,6 +534,7 @@ impl AddressingMode {
             AddressingMode::Relative => {
                 assert_eq!(cpu.instr_cycle, 2);
                 let delta = cpu.memory.read_u8(cpu.program_counter) as i8;
+                cpu.logger.add_data_to_last_instr(delta as u8);
                 cpu.program_counter += 1;
                 Relative(delta)
             }

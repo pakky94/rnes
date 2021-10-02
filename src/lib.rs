@@ -3,6 +3,7 @@
 pub mod bus;
 pub mod cartridge;
 pub mod cpu;
+pub mod input;
 pub mod memory;
 pub mod ppu;
 pub mod roms;
@@ -11,6 +12,7 @@ mod utils;
 use bus::{BusAction, PpuAction};
 pub(crate) use cartridge::Cartridge;
 use cpu::Cpu;
+use input::InputData;
 use ppu::{buffer::Buffer, Ppu};
 
 pub struct Nes {
@@ -39,13 +41,6 @@ impl Nes {
     pub fn tick(&mut self) -> bool {
         self.cpu.tick();
         let cpu_bus_action = self.cpu.bus_action;
-
-        if self.cpu.logger.is_logging() {
-            if self.cpu.cycles > 28000 {
-                self.cpu.logger.write_log("out.txt");
-                panic!();
-            }
-        }
 
         self.memory.tick();
 
@@ -93,7 +88,24 @@ impl Nes {
     pub fn enable_logging(&mut self) {
         self.cpu.logger.enable_logging();
     }
+
+    pub fn disable_logging(&mut self) {
+        self.cpu.logger.disable_logging();
+    }
+
+    pub fn write_cpu_logs(&mut self, filename: &str) {
+        self.cpu.logger.write_log(filename);
+    }
+
+    pub fn clear_logs(&mut self) {
+        self.cpu.logger.clear();
+    }
+
     pub fn set_pc(&mut self, pc: u16) {
         self.cpu.set_pc(pc);
+    }
+
+    pub fn set_input1(&mut self, input_data: InputData) {
+        self.memory.set_controller1_data(input_data);
     }
 }

@@ -809,6 +809,7 @@ impl BaseInstruction {
                     };
                     let target = *target;
                     let mut status = cpu.get_processor_status();
+                    status = status | 0b00100000;
                     match target {
                         BrkTarget::BRK => {
                             status = status | 0b00010000; // set break flag
@@ -844,6 +845,7 @@ impl BaseInstruction {
                     };
                     //cpu.program_counter = (pch as u16) << 8 | (*pcl as u16);
                     cpu.program_counter = merge_u16(*pcl, pch);
+                    println!("brk to {:#06x}, nmi: {:?}", cpu.program_counter, *&target);
                     cpu.instr_cycle = 0;
                 }
                 _ => unimplemented!("BRK instruction at cycle {}", cpu.instr_cycle),
@@ -1186,7 +1188,7 @@ impl BaseInstruction {
                 Done => {
                     let status = cpu.get_processor_status();
                     // TODO: check this
-                    let status = status | 16; // Break flag
+                    let status = status | 0b00110000; // Break flag
                     cpu.memory.write_u8(cpu.stack_address(), status);
                     cpu.decrement_stack_pointer();
 
@@ -1222,7 +1224,7 @@ impl BaseInstruction {
                     }
                     4 => {
                         let status = cpu.memory.read_u8(cpu.stack_address());
-                        let status = status & 0b11101111;
+                        //let status = status & 0b11101111;
                         cpu.set_processor_status(status);
 
                         cpu.instr_cycle = 0;
@@ -1547,7 +1549,7 @@ impl BaseInstruction {
                 let mut j = 0x6004;
                 let mut b = cpu.peek(j);
                 //while b != 0 {
-                for _ in 0..500 {
+                for _ in 0..1000 {
                     buffer.push(b);
                     b = cpu.peek(j);
                     j += 1;
@@ -1555,7 +1557,7 @@ impl BaseInstruction {
                 let s = String::from_utf8(buffer).unwrap();
                 println!("{}", s);
                 if cpu.logger.is_logging() {
-                    cpu.logger.print_log();
+                    //cpu.logger.print_log();
                     cpu.logger.write_log("out.txt");
                 }
                 panic!();

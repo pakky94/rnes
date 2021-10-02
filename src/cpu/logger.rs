@@ -7,10 +7,17 @@ struct LoggedInstr {
     cpu_status: Option<CpuStatus>,
     data: Vec<u8>,
     target_address: Option<(u16, u8)>,
+    cycle: usize,
+}
+
+#[derive(Clone)]
+enum LoggedEvent {
+    LoggedInstr(LoggedInstr),
+    NMI,
 }
 
 pub struct Logger {
-    instructions: VecDeque<LoggedInstr>,
+    instructions: VecDeque<LoggedEvent>,
     is_logging: bool,
 }
 
@@ -22,29 +29,35 @@ impl Logger {
         }
     }
 
-    pub fn start_new_instr(&mut self, address: u16, opcode: u8) {
-        self.instructions.push_back(LoggedInstr {
-            address,
-            cpu_status: None,
-            data: vec![opcode],
-            target_address: None,
-        })
+    pub fn log_nmi(&mut self) {
+        self.instructions.push_back(LoggedEvent::NMI);
+    }
+
+    pub fn start_new_instr(&mut self, address: u16, opcode: u8, cycle: usize) {
+        self.instructions
+            .push_back(LoggedEvent::LoggedInstr(LoggedInstr {
+                address,
+                cpu_status: None,
+                data: vec![opcode],
+                target_address: None,
+                cycle,
+            }))
     }
 
     pub fn set_proc_status(&mut self, status: CpuStatus) {
-        if let Some(last_instr) = self.instructions.back_mut() {
+        if let Some(LoggedEvent::LoggedInstr(ref mut last_instr)) = self.instructions.back_mut() {
             last_instr.cpu_status = Some(status);
         }
     }
 
     pub fn add_data_to_last_instr(&mut self, data: u8) {
-        if let Some(last_instr) = self.instructions.back_mut() {
+        if let Some(LoggedEvent::LoggedInstr(ref mut last_instr)) = self.instructions.back_mut() {
             last_instr.data.push(data);
         }
     }
 
     pub fn set_last_target_address(&mut self, address: u16, value: u8) {
-        if let Some(last_instr) = self.instructions.back_mut() {
+        if let Some(LoggedEvent::LoggedInstr(ref mut last_instr)) = self.instructions.back_mut() {
             last_instr.target_address = Some((address, value));
         }
     }
@@ -53,59 +66,74 @@ impl Logger {
         self.is_logging = true;
     }
 
+    pub fn disable_logging(&mut self) {
+        self.is_logging = false;
+    }
+
     pub fn is_logging(&self) -> bool {
         self.is_logging
     }
 
     pub fn get_log(&self) -> String {
         let mut complete = String::new();
-        let mut out = String::new();
-        for instr in self.instructions.iter() {
-            out.clear();
-            out.push_str(&format!("{:04X}  ", instr.address));
-            //for byte in instr.data.iter() {
-                //out.push_str(&format!("{:02X} ", byte));
-            //}
-            out.push_str(&format!("{:02X} ", instr.data[0]));
-
-            while out.len() < 16 {
-                out.push(' ');
+        for event in self.instructions.iter() {
+            match event {
+                LoggedEvent::LoggedInstr(instr) => {
+                    complete.push_str(&Self::print_instruction(instr));
+                    complete.push('\n');
+                }
+                LoggedEvent::NMI => complete.push_str("------ NMI ------\n"),
             }
-            out.push_str(opcode_to_mnemonic(instr.data[0]));
-            out.push(' ');
-
-            if let Some((addr, _val)) = instr.target_address.as_ref() {
-                out.push_str(&format!(
-                    "${:04X}",
-                    addr,
-                ));
-            }
-
-            while out.len() < 48 {
-                out.push(' ');
-            }
-            if let Some(cpu_status) = instr.cpu_status.as_ref() {
-                out.push_str(&format!(
-                    "A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}",
-                    cpu_status.accumulator,
-                    cpu_status.x,
-                    cpu_status.y,
-                    cpu_status.p,
-                    cpu_status.stack_pointer,
-                ));
-            }
-
-            out.push_str("\n");
-            complete += &out;
         }
 
         complete
+    }
+
+    fn print_instruction(instr: &LoggedInstr) -> String {
+        let mut out = String::with_capacity(90);
+        out.push_str(&format!("{:04X}  ", instr.address));
+        for byte in instr.data.iter() {
+            out.push_str(&format!("{:02X} ", byte));
+        }
+        //out.push_str(&format!("{:02X} ", instr.data[0]));
+
+        while out.len() < 16 {
+            out.push(' ');
+        }
+        out.push_str(opcode_to_mnemonic(instr.data[0]));
+        out.push(' ');
+
+        if let Some((addr, _val)) = instr.target_address.as_ref() {
+            out.push_str(&format!("${:04X}", addr,));
+        }
+
+        while out.len() < 48 {
+            out.push(' ');
+        }
+        if let Some(cpu_status) = instr.cpu_status.as_ref() {
+            out.push_str(&format!(
+                "A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}",
+                cpu_status.accumulator,
+                cpu_status.x,
+                cpu_status.y,
+                cpu_status.p,
+                cpu_status.stack_pointer,
+            ));
+        }
+
+        out.push_str(&format!("  cycle: {}", instr.cycle));
+
+        out
     }
 
     pub fn write_log(&self, filename: &str) {
         let out = self.get_log();
         let mut file = std::fs::File::create(filename).expect("create failed");
         file.write_all(out.as_bytes()).expect("write failed");
+    }
+
+    pub fn clear(&mut self) {
+        self.instructions.clear();
     }
 
     pub fn print_log(&self) {

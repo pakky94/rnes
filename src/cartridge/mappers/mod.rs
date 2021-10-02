@@ -15,6 +15,8 @@ pub(crate) trait Mapper {
 pub(crate) enum Mirroring {
     Vertical,
     Horizontal,
+    OneScreenLowerBank,
+    OneScreenUpperBank,
 }
 
 pub(crate) struct Empty;

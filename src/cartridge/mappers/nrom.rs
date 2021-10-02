@@ -102,6 +102,7 @@ impl NROM {
                         _ => unreachable!(),
                     }
                 }
+                _ => unreachable!(),
 
             }
         } else {

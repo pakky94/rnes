@@ -7,3 +7,4 @@ edition = "2018"
 
 [dependencies]
 sdl2 = { version = "0.34", features = [ "ttf" ] }
+time = { version = "0.3.2" }

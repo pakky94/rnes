@@ -45,7 +45,7 @@ pub struct Cpu {
     zero_flag: bool,
     interrupt_disable: bool,
     decimal_mode: bool,
-    break_command: bool,
+    //break_command: bool,
     overflow_flag: bool,
     negative_flag: bool,
     pub(crate) cycles: usize,
@@ -71,7 +71,7 @@ impl Cpu {
             zero_flag: false,
             interrupt_disable: false,
             decimal_mode: false,
-            break_command: false,
+            //break_command: false,
             overflow_flag: false,
             negative_flag: false,
             cycles: 0,
@@ -87,7 +87,13 @@ impl Cpu {
     }
 
     pub fn init(&mut self) {
-        self.program_counter = self.memory.read_u16(addresses::RESET_VECTOR);
+        let reset_addr = {
+            let low = self.memory.read_u8(addresses::RESET_VECTOR);
+            let high = self.memory.read_u8(addresses::RESET_VECTOR + 1);
+            crate::utils::merge_u16(low, high)
+        };
+        self.program_counter = reset_addr;
+        //self.program_counter = self.memory.read_u16(addresses::RESET_VECTOR);
         println!(
             "starting address: {:#06x} => {:#04x}\n",
             self.program_counter,
@@ -145,9 +151,16 @@ impl Cpu {
     }
 
     pub fn tick(&mut self) {
+        #[cfg(debug_assertions)]
+        println!("cycle: {}", self.cycles);
+        
         if !self.memory.try_dma() {
             if self.instr_cycle == 0 {
                 if self.nmi {
+                    if self.logger.is_logging() {
+                        self.logger.log_nmi();
+                    }
+
                     let _ = self.memory.read_u8(self.program_counter);
                     self.current_instr = Instruction::from_opcode(0x00); // force BRK instruction
                     // Don't increment PC
@@ -157,7 +170,7 @@ impl Cpu {
                 } else {
                     let opcode = self.memory.read_u8(self.program_counter);
                     if self.logger.is_logging() {
-                        self.logger.start_new_instr(self.program_counter, opcode);
+                        self.logger.start_new_instr(self.program_counter, opcode, self.cycles);
                         self.logger.set_proc_status(self.get_cpu_status());
                     }
                     self.current_instr = Instruction::from_opcode(opcode);
@@ -211,9 +224,9 @@ impl Cpu {
         if self.overflow_flag {
             out = out | (1u8 << 6);
         }
-        if self.break_command {
-            out = out | (1u8 << 4);
-        }
+        //if self.break_command {
+            //out = out | (1u8 << 4);
+        //}
         if self.decimal_mode {
             out = out | (1u8 << 3);
         }
@@ -234,7 +247,7 @@ impl Cpu {
         self.zero_flag = false;
         self.interrupt_disable = true;
         self.decimal_mode = false;
-        self.break_command = false;
+        //self.break_command = false;
         self.overflow_flag = false;
         self.negative_flag = false;
     }
@@ -245,7 +258,7 @@ impl Cpu {
         self.zero_flag = (status & 2u8) != 0;
         self.interrupt_disable = (status & 4u8) != 0;
         self.decimal_mode = (status & 8u8) != 0;
-        self.break_command = (status & 16u8) != 0;
+        //self.break_command = (status & 16u8) != 0;
         self.overflow_flag = (status & 64u8) != 0;
         self.negative_flag = (status & 128u8) != 0;
     }

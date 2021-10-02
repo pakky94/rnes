@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 use rnes::cartridge::Cartridge;
+use rnes::input::InputData;
 use rnes::roms;
 
 fn main() {
@@ -51,10 +52,13 @@ fn get_centered_rect(rect_width: u32, rect_height: u32, cons_width: u32, cons_he
 
 fn get_cartridge() -> Cartridge {
     //let path = "Super Mario Bros.nes";
-    let path = "Donkey Kong.nes";
+    //let path = "Donkey Kong.nes";
     //let path = "bomberman.nes";
     //let path = "Metroid.nes";
+    let path = "zelda.nes";
     //let path = "nestest.nes";
+    //let path = "nes_test_roms/instr_test-v3/all_instrs.nes";
+    //let path = "nes_test_roms/cpu_interrupts_v2/cpu_interrupts.nes";
     let cartridge = roms::read_rom(path);
     cartridge
 }
@@ -69,22 +73,45 @@ fn run_emulator() -> Result<(), String> {
         .build()
         .unwrap();
 
+    // Timing stuff
+    let mut target_time =
+        time::Instant::now() + (time::Duration::nanoseconds(1_000_000_000i64 / 60));
+
     let mut canvas = window.into_canvas().build().unwrap();
 
     let texture_creator = canvas.texture_creator();
 
     let cartridge = get_cartridge();
     let mut nes = rnes::Nes::with_cartridge(cartridge);
-    
+
     //nes.enable_logging();
+
+    #[cfg(debug_assertions)]
+    nes.enable_logging();
 
     canvas.set_draw_color(Color::RGB(0, 0, 0));
     canvas.clear();
     canvas.present();
+
+    let mut up_pressed = false;
+    let mut down_pressed = false;
+    let mut left_pressed = false;
+    let mut right_pressed = false;
+    let mut a_pressed = false;
+    let mut b_pressed = false;
+    let mut start_pressed = false;
+    let mut select_pressed = false;
+
+    // non games buttons
+    let mut log_pressed = false;
+
     let mut event_pump = sdl_context.event_pump().unwrap();
-    'running: loop {55;
+    'running: loop {
         canvas.set_draw_color(Color::RGB(255, 255, 255));
         canvas.clear();
+
+        let was_logging = log_pressed;
+
         for event in event_pump.poll_iter() {
             match event {
                 Event::Quit { .. }
@@ -92,9 +119,56 @@ fn run_emulator() -> Result<(), String> {
                     keycode: Some(Keycode::Escape),
                     ..
                 } => break 'running,
+                Event::KeyDown { keycode, .. } => match keycode {
+                    Some(Keycode::Up) => up_pressed = true,
+                    Some(Keycode::Down) => down_pressed = true,
+                    Some(Keycode::Left) => left_pressed = true,
+                    Some(Keycode::Right) => right_pressed = true,
+                    Some(Keycode::S) => start_pressed = true,
+                    Some(Keycode::A) => select_pressed = true,
+                    Some(Keycode::Z) => b_pressed = true,
+                    Some(Keycode::X) => a_pressed = true,
+
+                    Some(Keycode::L) => log_pressed = true,
+                    _ => {}
+                },
+                Event::KeyUp { keycode, .. } => match keycode {
+                    Some(Keycode::Up) => up_pressed = false,
+                    Some(Keycode::Down) => down_pressed = false,
+                    Some(Keycode::Left) => left_pressed = false,
+                    Some(Keycode::Right) => right_pressed = false,
+                    Some(Keycode::S) => start_pressed = false,
+                    Some(Keycode::A) => select_pressed = false,
+                    Some(Keycode::Z) => b_pressed = false,
+                    Some(Keycode::X) => a_pressed = false,
+
+                    Some(Keycode::L) => log_pressed = false,
+                    _ => {}
+                },
                 _ => {}
             }
         }
+
+        let input_data = InputData {
+            a: a_pressed,
+            b: b_pressed,
+            up: up_pressed,
+            down: down_pressed,
+            left: left_pressed,
+            right: right_pressed,
+            start: start_pressed,
+            select: select_pressed,
+        };
+        nes.set_input1(input_data);
+
+        if log_pressed {
+            nes.enable_logging();
+        } else if was_logging {
+            nes.write_cpu_logs("log.log");
+            nes.disable_logging();
+            nes.clear_logs();
+        }
+
         // The rest of the game loop goes here...
         nes.run_until_frame();
         let mut frame = nes.get_frame();
@@ -105,19 +179,19 @@ fn run_emulator() -> Result<(), String> {
             256 * 4,
             sdl2::pixels::PixelFormatEnum::RGBA8888,
         )?
-            .as_texture(&texture_creator)
-            .map_err(|e| e.to_string())?;
+        .as_texture(&texture_creator)
+        .map_err(|e| e.to_string())?;
 
         canvas.copy(&game_render, None, Some(Rect::new(0, 0, 512, 448)))?;
         nes.return_frame(frame);
-        
+
         //let surface = font
-            //.render("Hello Rust!")
-            //.blended(Color::RGBA(255, 255, 255, 255))
-            //.map_err(|e| e.to_string())?;
+        //.render("Hello Rust!")
+        //.blended(Color::RGBA(255, 255, 255, 255))
+        //.map_err(|e| e.to_string())?;
         //let texture = texture_creator
-            //.create_texture_from_surface(&surface)
-            //.map_err(|e| e.to_string())?;
+        //.create_texture_from_surface(&surface)
+        //.map_err(|e| e.to_string())?;
         //let TextureQuery { width, height, .. } = texture.query();
 
         //let padding = 64;
@@ -130,9 +204,12 @@ fn run_emulator() -> Result<(), String> {
         //
         //canvas.copy(&texture, None, Some(target))?;
 
-
         canvas.present();
-        ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
+        //::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
+        let time_now = time::Instant::now();
+        let sleep_time =  std::cmp::max(0, (target_time - time_now).subsec_nanoseconds());
+        target_time = time_now + time::Duration::nanoseconds(1_000_000_000i64 / 60);
+        ::std::thread::sleep(Duration::new(0, sleep_time as u32));
     }
 
     Ok(())
