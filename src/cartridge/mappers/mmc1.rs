@@ -113,7 +113,6 @@ impl Mapper for MMC1 {
 
 impl MMC1 {
     pub(crate) fn new(banks: Vec<[u8; 0x4000]>, chr_banks: Vec<[u8; 0x1000]>) -> Self {
-        println!("{:?}", banks);
         let last_bank = banks.len() - 1;
         Self {
             lower_bank: 0,

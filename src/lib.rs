@@ -73,6 +73,14 @@ impl Nes {
         frame_end
     }
 
+    pub fn render_pattern_table(&mut self, address: u16, palette_idx: usize) -> Buffer {
+        self.ppu.render_pattern_table(address, palette_idx)
+    }
+
+    pub fn render_nametable(&mut self, idx: usize) -> Buffer {
+        self.ppu.render_nametable(idx)
+    }
+
     pub fn run_until_frame(&mut self) {
         while !self.tick() {}
     }

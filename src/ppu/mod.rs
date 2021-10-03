@@ -1,14 +1,14 @@
 pub mod buffer;
 mod sprite_unit;
 
-use buffer::Buffer;
-
-use crate::{bus::PpuAction, memory::PpuMemory};
-
 use self::sprite_unit::SpriteUnit;
+use crate::{bus::PpuAction, memory::PpuMemory};
+use buffer::Buffer;
 
 const IMAGE_COLOR_PALETTE_ADDRESS: u16 = 0x3F00;
 const SPRITE_COLOR_PALETTE_ADDRESS: u16 = 0x3F10;
+const SCREEN_WIDTH: usize = 256;
+const SCREEN_HEIGHT: usize = 240;
 
 pub struct Ppu {
     memory: PpuMemory,
@@ -102,7 +102,7 @@ impl Ppu {
         Ppu {
             memory,
             buffers: Vec::new(),
-            current_frame: Buffer::empty(),
+            current_frame: Buffer::empty(SCREEN_WIDTH, SCREEN_HEIGHT),
             even_frame: false,
             cycles: 0,
             x: 340,
@@ -181,7 +181,6 @@ impl Ppu {
         }
 
         self.cycles += 1;
-        self.memory.set_v(self.reg_v);
 
         let mut nmi_triggered = false;
         let mut frame_ended = false;
@@ -196,6 +195,7 @@ impl Ppu {
             }
         }
         self.memory.oam_address_mirror_write(self.oam_addr);
+        self.memory.set_v(self.reg_v);
         PpuTickResult {
             nmi_triggered,
             frame_ended,
@@ -218,8 +218,8 @@ impl Ppu {
         } else if self.y == 261 {
             if self.x >= 322 && self.x <= 337 {
                 //if self.x == 322 {
-                    //println!("fine_x: {}", self.fine_x);
-                    //self.fine_x = self.reg_x;
+                //println!("fine_x: {}", self.fine_x);
+                //self.fine_x = self.reg_x;
                 //}
                 self.shift_registers();
             }
@@ -242,10 +242,10 @@ impl Ppu {
                 }
 
                 //if (self.y % 8 == 0) && (self.x % 8 < 4) {
-                    //self.current_frame
-                        //.set_pixel(self.x - 1, self.y, 0, 0xFF, 0xFF);
+                //self.current_frame
+                //.set_pixel(self.x - 1, self.y, 0, 0xFF, 0xFF);
                 //} else {
-                let (r, g, b) = if (sprite_color & 0x03) == 0 || !sprite_fg {
+                let (r, g, b) = if (sprite_color & 0x03) == 0 || (!sprite_fg && bg_color & 0x03 != 0) {
                     if bg_color & 0x03 == 0 {
                         bg_color = 0;
                     }
@@ -255,7 +255,7 @@ impl Ppu {
                     self.map_sprite_color(sprite_color)
                 };
 
-                    self.current_frame.set_pixel(self.x - 1, self.y, r, g, b);
+                self.current_frame.set_pixel(self.x - 1, self.y, r, g, b);
                 //}
             }
         }
@@ -543,7 +543,7 @@ impl Ppu {
         let mut new_buffer = if let Some(buf) = self.buffers.pop() {
             buf
         } else {
-            Buffer::empty()
+            Buffer::empty(SCREEN_WIDTH, SCREEN_HEIGHT)
         };
 
         std::mem::swap(&mut self.current_frame, &mut new_buffer);
@@ -630,6 +630,7 @@ impl Ppu {
             }
             PpuAction::OamDataWrite(val) => {
                 // TODO:
+                println!("OAM data write {:#04x} at addr: {:#04x}", val, self.oam_addr);
                 if self.y >= 240 && self.y != 261 {
                     self.memory.write_oam(self.oam_addr as usize, val);
                 }
@@ -781,6 +782,82 @@ impl Ppu {
         assert!(y < 8);
 
         y
+    }
+
+    pub(crate) fn render_pattern_table(&mut self, table_addr: u16, palette_idx: usize) -> Buffer {
+        let mut buf = Buffer::empty(128, 128);
+        for y in 0..16 {
+            for x in 0..16 {
+                let tile = self.render_tile(table_addr + y * 0x100 + x * 0x10, palette_idx);
+                for y_fine in 0..8 {
+                    for x_fine in 0..8 {
+                        let pixel = tile[y_fine][x_fine];
+                        let (r, g, b) = map_system_color_to_rgb(pixel);
+                        buf.set_pixel(x as usize * 8 + x_fine, y as usize * 8 + y_fine, r, g, b);
+                    }
+                }
+            }
+        }
+        buf
+    }
+
+    pub(crate) fn render_nametable(&mut self, idx: usize) -> Buffer {
+        let nametable_addr = (idx * 0x400 + 0x2000) as u16;
+        let patterntable_addr = self.background_pattern_table;
+        let mut buf = Buffer::empty(256, 240);
+
+        for y in 0..30 {
+            for x in 0..32 {
+                let tile_offset = y * 32 + x;
+                let tile_addr_offset =
+                    self.memory.read(nametable_addr + tile_offset) as u16 * 16;
+
+                let attribute_addr_offset = ((y & 0b11100) << 1) | ((x & 0b11100) >> 2);
+                let attribute_byte = self.memory.read(nametable_addr + 960 + attribute_addr_offset);
+                let attribute_idx = y & 0b10 | ((x & 0b10) >> 1);
+                
+                let palette = (attribute_byte >> (2 * attribute_idx)) & 0b11;
+
+                let tile = self.render_tile(tile_addr_offset + patterntable_addr, palette as usize);
+                for y_fine in 0..8 {
+                    for x_fine in 0..8 {
+                        let pixel = tile[y_fine][x_fine];
+                        let (r, g, b) = map_system_color_to_rgb(pixel);
+                        buf.set_pixel(x as usize * 8 + x_fine, y as usize * 8 + y_fine, r, g, b);
+                    }
+                }
+            }
+        }
+
+        buf
+    }
+
+    fn render_tile(&mut self, address: u16, palette_idx: usize) -> [[u8; 8]; 8] {
+        let mut palette = [0u8; 4];
+
+        let bg_color = self.memory.read(IMAGE_COLOR_PALETTE_ADDRESS);
+        for i in 0..4 {
+            palette[i] = self
+                .memory
+                .read(IMAGE_COLOR_PALETTE_ADDRESS + palette_idx as u16 * 4 + i as u16);
+        }
+
+        let mut out = [[0; 8]; 8];
+        for y in 0..8 {
+            let low = self.memory.read(address + y);
+            let high = self.memory.read(address + y + 8);
+
+            for x in 0..8 {
+                let pixel = ((low >> (7 - x)) & 1) | (((high >> (7 - x)) & 1) << 1);
+                let pixel = if pixel == 0 {
+                    bg_color
+                } else {
+                    palette[pixel as usize]
+                };
+                out[y as usize][x as usize] = pixel
+            }
+        }
+        out
     }
 }
 

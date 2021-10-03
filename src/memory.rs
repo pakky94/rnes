@@ -173,7 +173,7 @@ impl MemoryInt {
                         self.bus_action = BusAction::PpuAction(PpuAction::PpuAddrWrite(value))
                     }
                     0x2007 => {
-                        println!("Writing to PPUDATA: {:08b}", value);
+                        println!("Writing to PPUDATA: {:08b}, addr: {:#06x}", value, self.ppu_v);
                         self.bus_action = BusAction::PpuAction(PpuAction::PpuDataWrite(value))
                     }
                     _ => unreachable!(
