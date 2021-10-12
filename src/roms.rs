@@ -3,20 +3,20 @@ use std::io::Read;
 
 use crate::Cartridge;
 
-pub fn read_rom(filename: &str) -> Cartridge {
+pub fn read_rom(filename: &str) -> Result<Cartridge, String> {
     let mut header = [0u8; 16];
 
-    let mut f = File::open(filename).unwrap();
-    f.read_exact(&mut header).unwrap();
+    let mut f = File::open(filename).map_err(|e| e.to_string())?;
+    f.read_exact(&mut header).map_err(|e| e.to_string())?;
 
     //let mapper_low = (header[6] & 248) >> 4;
     //let mapper_high = header[7] & 248; // 4 highest bits
     //let mapper = mapper_high | mapper_low;
 
     let mut data = Vec::new();
-    f.read_to_end(&mut data).unwrap();
+    f.read_to_end(&mut data).map_err(|e| e.to_string())?;
 
-    Cartridge::new(header, data)
+    Ok(Cartridge::new(header, data))
 
     //
     //println!("mapper found: {}", mapper);

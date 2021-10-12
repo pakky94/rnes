@@ -12,6 +12,7 @@ static SCREEN_HEIGHT: u32 = 768;
 
 extern crate sdl2;
 
+use sdl2::audio::AudioSpecDesired;
 use sdl2::controller::{Button, GameController};
 use sdl2::event::Event;
 use sdl2::joystick::HatState;
@@ -19,6 +20,7 @@ use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use sdl2::surface::Surface;
+use std::fmt::format;
 use std::time::Duration;
 
 // handle the annoying Rect i32
@@ -52,20 +54,23 @@ fn get_centered_rect(rect_width: u32, rect_height: u32, cons_width: u32, cons_he
     rect!(cx, cy, w, h)
 }
 
-fn get_cartridge() -> Cartridge {
-    //let path = "Super Mario Bros.nes";
-    //let path = "Donkey Kong.nes";
-    //let path = "bomberman.nes";
-    //let path = "Metroid.nes";
-    let path = "zelda.nes";
-    //let path = "nestest.nes";
+fn try_get_cartridge(filename: &str) -> Result<Cartridge, String> {
+    //let path = "roms/Super Mario Bros.nes";
+    //let path = "roms/Donkey Kong.nes";
+    //let path = "roms/bomberman.nes";
+    //let path = "roms/Metroid.nes";
+    //let path = "roms/zelda.nes";
+    //let path = "roms/nestest.nes";
     //let path = "nes_test_roms/instr_test-v3/all_instrs.nes";
     //let path = "nes_test_roms/cpu_interrupts_v2/cpu_interrupts.nes";
-    let cartridge = roms::read_rom(path);
+    //let path = "nes_test_roms/blargg_ppu_tests_2005.09.15b/palette_ram.nes";
+    let cartridge = roms::read_rom(filename);
     cartridge
 }
 
 fn run_emulator() -> Result<(), String> {
+    let mut save_path = None;
+
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
 
@@ -75,16 +80,20 @@ fn run_emulator() -> Result<(), String> {
         .build()
         .unwrap();
 
-    // Timing stuff
-    let mut target_time =
-        time::Instant::now() + (time::Duration::nanoseconds(1_000_000_000i64 / 60));
-
     let mut canvas = window.into_canvas().build().unwrap();
 
     let texture_creator = canvas.texture_creator();
 
-    let cartridge = get_cartridge();
-    let mut nes = rnes::Nes::with_cartridge(cartridge);
+    let mut nes = rnes::Nes::new();
+
+    let audio_subsystem = sdl_context.audio().unwrap();
+    let audio_spec = AudioSpecDesired {
+        freq: Some(44100),
+        channels: Some(1),
+        samples: None,
+    };
+    let mut device = nes.initialize_audio(&audio_subsystem, &audio_spec).unwrap();
+    device.resume();
 
     //nes.enable_logging();
 
@@ -119,6 +128,12 @@ fn run_emulator() -> Result<(), String> {
     let mut palette_idx = 0;
 
     let mut event_pump = sdl_context.event_pump().unwrap();
+
+    // Timing stuff
+    let mut start_time = time::Instant::now();
+    let mut seconds_elapsed = 0;
+    let mut frame_count = 0;
+
     'running: loop {
         canvas.set_draw_color(Color::RGB(255, 255, 255));
         canvas.clear();
@@ -132,6 +147,14 @@ fn run_emulator() -> Result<(), String> {
                     keycode: Some(Keycode::Escape),
                     ..
                 } => break 'running,
+                Event::DropFile { filename, .. } => {
+                    if let Ok(catridge) = try_get_cartridge(&filename) {
+                        nes.load_cartridge(catridge);
+                        let new_save_path = get_save_path(&filename);
+                        nes.try_load_data(&new_save_path);
+                        save_path = Some(new_save_path);
+                    }
+                }
                 Event::KeyDown { keycode, .. } => match keycode {
                     Some(Keycode::Up) => inputs.up = true,
                     Some(Keycode::Down) => inputs.down = true,
@@ -159,9 +182,12 @@ fn run_emulator() -> Result<(), String> {
                     Some(Keycode::L) => log_pressed = false,
                     _ => {}
                 },
-                Event::JoyButtonDown { button_idx, .. } => handle_button_press(&mut inputs, button_idx),
-                Event::JoyButtonUp { button_idx, .. } => handle_button_release(&mut inputs, button_idx),
-                //Event::JoyAxisMotion { axis_idx, value, .. } => panic!("idx: {}, val: {}", axis_idx, value),
+                Event::JoyButtonDown { button_idx, .. } => {
+                    handle_button_press(&mut inputs, button_idx)
+                }
+                Event::JoyButtonUp { button_idx, .. } => {
+                    handle_button_release(&mut inputs, button_idx)
+                }
                 Event::JoyHatMotion { state, .. } => handle_dpad(&mut inputs, state),
                 _ => {}
             }
@@ -202,8 +228,8 @@ fn run_emulator() -> Result<(), String> {
                 128 * 4,
                 sdl2::pixels::PixelFormatEnum::RGBA8888,
             )?
-                .as_texture(&texture_creator)
-                .map_err(|e| e.to_string())?;
+            .as_texture(&texture_creator)
+            .map_err(|e| e.to_string())?;
 
             canvas.copy(&palette0_render, None, Some(Rect::new(0, 460, 256, 256)))?;
 
@@ -215,9 +241,9 @@ fn run_emulator() -> Result<(), String> {
                 128 * 4,
                 sdl2::pixels::PixelFormatEnum::RGBA8888,
             )?
-                .as_texture(&texture_creator)
-                .map_err(|e| e.to_string())?;
-            
+            .as_texture(&texture_creator)
+            .map_err(|e| e.to_string())?;
+
             canvas.copy(&palette1_render, None, Some(Rect::new(256, 460, 256, 256)))?;
 
             for i in 0..4 {
@@ -229,8 +255,8 @@ fn run_emulator() -> Result<(), String> {
                     256 * 4,
                     sdl2::pixels::PixelFormatEnum::RGBA8888,
                 )?
-                    .as_texture(&texture_creator)
-                    .map_err(|e| e.to_string())?;
+                .as_texture(&texture_creator)
+                .map_err(|e| e.to_string())?;
 
                 let (x, y) = match i {
                     0 => (0, 0),
@@ -240,37 +266,57 @@ fn run_emulator() -> Result<(), String> {
                     _ => unreachable!(),
                 };
                 let x = x + 512;
-                
+
                 canvas.copy(&nametable_render, None, Some(Rect::new(x, y, 256, 240)))?;
             }
+
+            let mut palettes = nes.render_palettes();
+            let palettes_render = Surface::from_data(
+                palettes.get_data(),
+                256,
+                32,
+                256 * 4,
+                sdl2::pixels::PixelFormatEnum::RGBA8888,
+            )?
+            .as_texture(&texture_creator)
+            .map_err(|e| e.to_string())?;
+
+            canvas.copy(&palettes_render, None, Some(Rect::new(512, 512, 256, 32)))?;
         }
 
-
-        //let surface = font
-        //.render("Hello Rust!")
-        //.blended(Color::RGBA(255, 255, 255, 255))
-        //.map_err(|e| e.to_string())?;
-        //let texture = texture_creator
-        //.create_texture_from_surface(&surface)
-        //.map_err(|e| e.to_string())?;
-        //let TextureQuery { width, height, .. } = texture.query();
-
-        //let padding = 64;
-        //let target = get_centered_rect(
-        //width,
-        //height,
-        //SCREEN_WIDTH - padding,
-        //SCREEN_HEIGHT - padding,
-        //);
-        //
-        //canvas.copy(&texture, None, Some(target))?;
+        nes.update_audio_generator(device.lock());
 
         canvas.present();
-        //::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
+
+        frame_count += 1;
+        //println!("---- Frame {:10} ----", frame_count);
+        if frame_count == 60 {
+            frame_count = 0;
+            seconds_elapsed += 1;
+        }
+
         let time_now = time::Instant::now();
-        let sleep_time =  std::cmp::max(0, (target_time - time_now).subsec_nanoseconds());
-        target_time = time_now + time::Duration::nanoseconds(1_000_000_000i64 / 60);
+        if start_time > time_now {
+            //eprintln!("start: {:?}, now: {:?}", start_time, time_now);
+            start_time = time_now;
+            frame_count = 1;
+            seconds_elapsed = 0;
+        }
+        let mut target_time = start_time + time::Duration::seconds(seconds_elapsed);
+        if frame_count != 0 {
+            target_time += time::Duration::nanoseconds(frame_count * 1_000_000_000 / 60);
+        }
+        let sleep_time = std::cmp::max(0, (target_time - time_now).whole_nanoseconds());
+        //let sleep_time = (target_time - time_now).whole_nanoseconds();
         ::std::thread::sleep(Duration::new(0, sleep_time as u32));
+
+        //::std::thread::sleep(Duration::from_millis(500));
+    }
+
+
+    // Save state
+    if let Some(save_path) = save_path {
+        nes.save_data(&save_path);
     }
 
     Ok(())
@@ -282,8 +328,7 @@ fn handle_button_press(inputs: &mut InputData, button_idx: u8) {
         1 => inputs.a = true,
         6 => inputs.select = true,
         7 => inputs.start = true,
-        _ => {},
-        //_ => todo!("{}", button_idx),
+        _ => {} //_ => todo!("{}", button_idx),
     }
 }
 
@@ -293,19 +338,17 @@ fn handle_button_release(inputs: &mut InputData, button_idx: u8) {
         1 => inputs.a = false,
         6 => inputs.select = false,
         7 => inputs.start = false,
-        _ => {},
-        //_ => todo!(),
+        _ => {} //_ => todo!(),
     }
 }
 
 fn handle_dpad(inputs: &mut InputData, state: HatState) {
+    inputs.up = false;
+    inputs.down = false;
+    inputs.left = false;
+    inputs.right = false;
     match state {
-        HatState::Centered => {
-            inputs.up = false;
-            inputs.down = false;
-            inputs.left = false;
-            inputs.right = false;
-        }
+        HatState::Centered => {}
         HatState::Up => inputs.up = true,
         HatState::Right => inputs.right = true,
         HatState::Down => inputs.down = true,
@@ -327,4 +370,12 @@ fn handle_dpad(inputs: &mut InputData, state: HatState) {
             inputs.down = true;
         }
     }
+}
+
+fn get_save_path(rom: &str) -> String {
+    let rom_path = std::path::Path::new(rom);
+    let rom_path = rom_path.parent().unwrap().join(rom_path.file_stem().unwrap());
+    let save_path = format!("{}.sav", rom_path.to_str().unwrap());
+    eprintln!("rom: {}\n save: {}", rom, save_path);
+    save_path
 }

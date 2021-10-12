@@ -1,4 +1,7 @@
-use super::{super::{BANK_1_OFFSET, BANK_2_OFFSET}, Mapper, Mirroring};
+use super::{
+    super::{BANK_1_OFFSET, BANK_2_OFFSET},
+    Mapper, Mirroring,
+};
 
 pub(crate) struct NROM {
     one_bank: bool,
@@ -47,10 +50,23 @@ impl Mapper for NROM {
             unreachable!();
         }
     }
+
+    fn get_save_ram(&self) -> Vec<u8> {
+        todo!()
+    }
+
+    fn set_save_ram(&mut self, data: Vec<u8>) {
+        todo!()
+    }
 }
 
 impl NROM {
-    pub(crate) fn new(one_bank: bool, prg_banks: [[u8; 0x4000]; 2], chr_bank: [u8; 0x2000], mirroring: Mirroring) -> Self {
+    pub(crate) fn new(
+        one_bank: bool,
+        prg_banks: [[u8; 0x4000]; 2],
+        chr_bank: [u8; 0x2000],
+        mirroring: Mirroring,
+    ) -> Self {
         Self {
             one_bank,
             prg_banks,
@@ -68,18 +84,10 @@ impl NROM {
                     let high_addr = address & 0xC00;
                     let low_addr = address % 0x400;
                     match high_addr {
-                        0x000 => {
-                            (0x000 | low_addr) as usize
-                        }
-                        0x400 => {
-                            (0x400 | low_addr) as usize
-                        }
-                        0x800 => {
-                            (0x000 | low_addr) as usize
-                        }
-                        0xC00 => {
-                            (0x400 | low_addr) as usize
-                        }
+                        0x000 => (0x000 | low_addr) as usize,
+                        0x400 => (0x400 | low_addr) as usize,
+                        0x800 => (0x000 | low_addr) as usize,
+                        0xC00 => (0x400 | low_addr) as usize,
                         _ => unreachable!(),
                     }
                 }
@@ -87,23 +95,14 @@ impl NROM {
                     let high_addr = address & 0xC00;
                     let low_addr = address % 0x400;
                     match high_addr {
-                        0x000 => {
-                            (0x000 | low_addr) as usize
-                        }
-                        0x400 => {
-                            (0x000 | low_addr) as usize
-                        }
-                        0x800 => {
-                            (0x400 | low_addr) as usize
-                        }
-                        0xC00 => {
-                            (0x400 | low_addr) as usize
-                        }
+                        0x000 => (0x000 | low_addr) as usize,
+                        0x400 => (0x000 | low_addr) as usize,
+                        0x800 => (0x400 | low_addr) as usize,
+                        0xC00 => (0x400 | low_addr) as usize,
                         _ => unreachable!(),
                     }
                 }
                 _ => unreachable!(),
-
             }
         } else {
             unreachable!();

@@ -1,14 +1,16 @@
+use super::envelope::Envelope;
+
 const CPU_FREQ: u32 = 1789773;
+
 pub(crate) struct Pulse {
     pub settings: PulseSettings,
     t: u16,
     cycle: u8,
     sweeper_reload_flag: bool,
     sweeper_divider_counter: u8,
-    envelope_start_flag: bool,
-    envelope_divider: u8,
-    envelope_decay_level: u8,
     mute: bool,
+
+    envelope: Envelope,
 
     pub length_counter: u8,
 }
@@ -21,10 +23,9 @@ impl Pulse {
             cycle: 0,
             sweeper_reload_flag: false,
             sweeper_divider_counter: 0,
-            envelope_start_flag: false,
-            envelope_divider: 0,
-            envelope_decay_level: 0,
             mute: false,
+
+            envelope: Envelope::new(),
 
             length_counter: 0,
         }
@@ -62,9 +63,8 @@ impl Pulse {
                 self.sweeper_divider_counter -= 1;
             }
 
-
             // length counter stuff
-            if !self.settings.envelope_loop_flag {
+            if !self.settings.length_counter_halt {
                 if self.length_counter != 0 {
                     self.length_counter -= 1;
                 }
@@ -72,24 +72,7 @@ impl Pulse {
         }
 
         if envelope_tick {
-            if self.envelope_start_flag {
-                self.envelope_decay_level = 15;
-                self.envelope_divider = self.settings.volume;
-                self.envelope_start_flag = false;
-            } else {
-                if self.envelope_divider == 0 {
-                    self.envelope_divider = self.settings.volume;
-                    if self.envelope_decay_level != 0 {
-                        self.envelope_decay_level -= 1;
-                    } else {
-                        if self.settings.envelope_loop_flag {
-                            self.envelope_decay_level = 15;
-                        }
-                    }
-                } else {
-                    self.envelope_divider -= 1;
-                }
-            }
+            self.envelope.tick();
         }
     }
 
@@ -134,16 +117,21 @@ impl Pulse {
             if self.settings.constant_vol {
                 self.settings.volume
             } else {
-                self.envelope_decay_level
+                self.envelope.get_volume()
             }
         }
     }
 
     pub(crate) fn write0(&mut self, value: u8) {
         self.settings.duty = (value & 0b11000000) >> 6;
-        self.settings.constant_vol = (value & 0b00010000) != 0;
-        self.settings.envelope_loop_flag = (value & 0b0010_0000) != 0;
+
+        self.settings.length_counter_halt = (value & 0b0010_0000) != 0;
+
+        self.settings.constant_vol = (value & 0b0001_0000) != 0;
+        self.envelope.loop_flag = self.settings.constant_vol;
+
         self.settings.volume = value & 0b1111;
+        self.envelope.start_parameter = self.settings.volume;
     }
 
     pub(crate) fn write1(&mut self, value: u8) {
@@ -169,7 +157,7 @@ impl Pulse {
         self.length_counter = super::LENGTH_COUNTER_TABLE[length_counter_load as usize];
 
         self.cycle = 0;
-        self.envelope_start_flag = true;
+        self.envelope.start_flag = true;
     }
 }
 
@@ -178,7 +166,7 @@ pub(crate) struct PulseSettings {
     pub duty: u8,
     pub constant_vol: bool,
     pub volume: u8,
-    pub envelope_loop_flag: bool,
+    pub length_counter_halt: bool,
     pub sweep_enable: bool,
     pub sweep_period: u8,
     pub sweep_negate: bool,
@@ -192,7 +180,7 @@ impl PulseSettings {
             duty: 0,
             constant_vol: false,
             volume: 0,
-            envelope_loop_flag: false,
+            length_counter_halt: false,
             sweep_enable: false,
             sweep_period: 0,
             sweep_negate: false,

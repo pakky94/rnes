@@ -1,6 +1,7 @@
 #[derive(Clone, Copy)]
 pub enum BusAction {
     PpuAction(PpuAction),
+    ApuWrite((u16, u8)),
     None
 }
 

@@ -2,8 +2,10 @@ use super::{
     super::{BANK_1_OFFSET, BANK_2_OFFSET},
     Mapper, Mirroring,
 };
+use crate::cpu::addresses::{EXPANSION_ROM, PRG_ROM_LOWER, SAVE_RAM};
 
 pub(crate) struct MMC1 {
+    save_ram: [u8; 0x2000],
     lower_bank: usize,
     higher_bank: usize,
     banks: Vec<[u8; 0x4000]>,
@@ -34,39 +36,48 @@ impl Mapper for MMC1 {
             self.banks[self.higher_bank][(address - BANK_2_OFFSET) as usize]
         } else if address >= BANK_1_OFFSET {
             self.banks[self.lower_bank][(address - BANK_1_OFFSET) as usize]
+        } else if address >= SAVE_RAM {
+            // PRG RAM
+            self.save_ram[(address - SAVE_RAM) as usize]
         } else {
             unreachable!()
         }
     }
 
     fn write(&mut self, address: u16, value: u8) {
-        if self.written_last_cycle > 0 {
-            return;
-        }
-        self.written_last_cycle = 1;
-
-        if value >= 128 {
-            self.clear_load_register();
-        } else {
-            let low_bit = value & 1;
-            self.load_register = (self.load_register << 1) | low_bit;
-            if (self.load_register & 0b00100000) != 0 {
-                // load_register full
-                let load_register = self.load_register & 0b00011111;
-                //println!("address:      {:#18b}", address);
-                //println!("mask:         {:#18b}", 0x6000);
-                let write_address = address & 0x6000; // get only bit 13 and 14 of the address
-                                                      //println!("write_a:      {:#18b}", write_address);
-                let control_address = (write_address >> 13) as u8;
-                //println!("shifted mask: {:#18b}", 0x6000 >> 13);
-                //println!("shifted addr: {:#18b}", control_address);
-
-                self.write_control(control_address, load_register);
-
-                //panic!();
-
-                self.clear_load_register();
+        if address >= BANK_1_OFFSET {
+            if self.written_last_cycle > 0 {
+                return;
             }
+            self.written_last_cycle = 1;
+
+            if value >= 128 {
+                self.clear_load_register();
+            } else {
+                let low_bit = value & 1;
+                self.load_register = (self.load_register >> 1) | (low_bit << 5);
+                if self.load_register % 2 == 1 {
+                    // load_register full
+                    let load_register = self.load_register & 0b00111110;
+                    let load_register = load_register >> 1;
+                    //println!("address:      {:#18b}", address);
+                    //println!("mask:         {:#18b}", 0x6000);
+                    let write_address = address & 0x6000; // get only bit 13 and 14 of the address
+                                                          //println!("write_a:      {:#18b}", write_address);
+                    let control_address = (write_address >> 13) as u8;
+                    //println!("shifted mask: {:#18b}", 0x6000 >> 13);
+                    //println!("shifted addr: {:#18b}", control_address);
+
+                    self.write_control(control_address, load_register);
+
+                    //panic!();
+
+                    self.clear_load_register();
+                }
+            }
+        } else {
+            // PRG RAM
+            self.save_ram[(address - SAVE_RAM) as usize] = value;
         }
     }
 
@@ -103,10 +114,24 @@ impl Mapper for MMC1 {
             self.chr_banks[self.higher_chr][(address as usize) & !0x1000] = value;
         // treat CHR-ROM as RAM
         } else if address < 0x3F00 {
-            let address = self.map_nametable_address(address);
-            internal_vram[address as usize] = value;
+            let address_mapped = self.map_nametable_address(address);
+            println!(
+                "writing {:#04X} to nametable from {:#06X} to {:#06X}",
+                value, address, address_mapped
+            );
+            internal_vram[address_mapped as usize] = value;
         } else {
             unreachable!();
+        }
+    }
+
+    fn get_save_ram(&self) -> Vec<u8> {
+        self.save_ram.iter().cloned().collect()
+    }
+
+    fn set_save_ram(&mut self, data: Vec<u8>) {
+        for (i, x) in data.into_iter().take(0x2000).enumerate() {
+            self.save_ram[i] = x;
         }
     }
 }
@@ -125,8 +150,9 @@ impl MMC1 {
             written_last_cycle: 0,
             //prg_rom_switch_mode: PrgRomSwitchMode::Switch32k,
             prg_rom_switch_mode: PrgRomSwitchMode::LastFixed,
-            mirroring: Mirroring::Horizontal,
+            mirroring: Mirroring::Vertical,
             chr_rom_switch_mode: ChrRomSwitchMode::Switch8k,
+            save_ram: [0; 0x2000]
         }
     }
 
@@ -135,6 +161,25 @@ impl MMC1 {
         match address {
             0 => {
                 let prg_rom_bank_mode = (value & 12) >> 2;
+                match value & 0b11 {
+                    0 => {
+                        self.mirroring = Mirroring::OneScreenLowerBank;
+                        println!("switched to one-screen lower bank mirroring");
+                    }
+                    1 => {
+                        self.mirroring = Mirroring::OneScreenUpperBank;
+                        println!("switched to one-screen upper bank mirroring");
+                    }
+                    2 => {
+                        self.mirroring = Mirroring::Vertical;
+                        println!("switched to vertical mirroring");
+                    }
+                    3 => {
+                        self.mirroring = Mirroring::Horizontal;
+                        println!("switched to horizontal mirroring");
+                    }
+                    _ => unreachable!(),
+                }
                 match prg_rom_bank_mode {
                     0 | 1 => {
                         self.prg_rom_switch_mode = PrgRomSwitchMode::Switch32k;
@@ -205,7 +250,11 @@ impl MMC1 {
                     }
                     PrgRomSwitchMode::LastFixed => {
                         self.lower_bank = (bank as usize) % self.banks.len();
-                        println!("switched lower bank to bank {}", self.lower_bank);
+                        println!(
+                            "switched lower bank to bank {} out of {} banks",
+                            self.lower_bank,
+                            self.banks.len()
+                        );
                     }
                 }
             }
@@ -215,12 +264,13 @@ impl MMC1 {
 
     fn clear_load_register(&mut self) {
         println!("cleared MMC1 load register");
-        self.load_register = 1;
+        self.load_register = 0b100000;
     }
 
     fn map_nametable_address(&self, address: u16) -> usize {
         if address < 0x2000 {
-            address as usize
+            //address as usize
+            unreachable!()
         } else if address < 0x3F00 {
             match self.mirroring {
                 Mirroring::Vertical => {
@@ -245,7 +295,8 @@ impl MMC1 {
                         _ => unreachable!(),
                     }
                 }
-                _ => todo!(),
+                Mirroring::OneScreenLowerBank => (address % 0x400) as usize,
+                Mirroring::OneScreenUpperBank => ((address % 0x400) | 0x400) as usize,
             }
         } else {
             unreachable!();

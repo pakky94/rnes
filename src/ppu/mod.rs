@@ -180,6 +180,11 @@ impl Ppu {
             self.rendering();
         }
 
+        // Reset sprite zero hit
+        if self.y == 261 && self.x == 1 {
+            self.sprite_zero_hit = false;
+        }
+
         self.cycles += 1;
 
         let mut nmi_triggered = false;
@@ -291,21 +296,16 @@ impl Ppu {
             } else if self.x == 256 {
                 self.increment_y();
                 self.pixels += 1;
+            } else if self.x == 257 {
+                self.copy_tx_to_v();
             }
         } else if self.y == 261 {
-            if self.x == 1 {
-                self.sprite_zero_hit = false;
-            }
             if self.x >= 321 && self.x <= 336 {
                 self.increment_x();
                 //self.pixels += 1;
             } else if self.x >= 280 && self.x <= 304 {
                 self.copy_ty_to_v();
             }
-        }
-
-        if self.x == 257 {
-            self.copy_tx_to_v();
         }
     }
 
@@ -671,6 +671,7 @@ impl Ppu {
                     self.reg_w = false;
                 }
                 println!("t is:  {:016b}", self.reg_t);
+                println!("v is:  {:016b}", self.reg_v);
             }
             PpuAction::PpuDataRead => {
                 self.reg_v = self.reg_v.wrapping_add(self.vram_address_increment);
@@ -858,6 +859,25 @@ impl Ppu {
             }
         }
         out
+    }
+
+    pub(crate) fn render_palettes(&mut self) -> Buffer {
+        let mut buf = Buffer::empty(256, 32);
+
+        for y in 0..2 {
+            for x in 0..16 {
+                let color_idx = y * 16 + x;
+                let color_idx = self.memory.read(color_idx + 0x3F00);
+
+                let (r, g, b) = map_system_color_to_rgb(color_idx);
+                for y_fine in 0..16 {
+                    for x_fine in 0..16 {
+                        buf.set_pixel(x as usize * 16 + x_fine, y as usize * 16 + y_fine, r, g, b);
+                    }
+                }
+            }
+        }
+        buf
     }
 }
 

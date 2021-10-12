@@ -793,6 +793,7 @@ impl AddressingMode {
             } => match cpu.instr_cycle {
                 2 => {
                     *pointer = cpu.memory.read_u8(cpu.program_counter);
+                    cpu.logger.add_data_to_last_instr(*pointer);
                     cpu.program_counter += 1;
                     NotDone
                 }
@@ -823,6 +824,7 @@ impl AddressingMode {
             } => match cpu.instr_cycle {
                 2 => {
                     *pointer = cpu.memory.read_u8(cpu.program_counter);
+                    cpu.logger.add_data_to_last_instr(*pointer);
                     cpu.program_counter += 1;
                     NotDone
                 }
@@ -854,6 +856,7 @@ impl AddressingMode {
             } => match cpu.instr_cycle {
                 2 => {
                     *pointer = cpu.memory.read_u8(cpu.program_counter);
+                    cpu.logger.add_data_to_last_instr(*pointer);
                     cpu.program_counter += 1;
                     NotDone
                 }
@@ -894,6 +897,7 @@ impl AddressingMode {
             } => match cpu.instr_cycle {
                 2 => {
                     *pointer = cpu.memory.read_u8(cpu.program_counter);
+                    cpu.logger.add_data_to_last_instr(*pointer);
                     cpu.program_counter += 1;
                     NotDone
                 }
@@ -931,6 +935,7 @@ impl AddressingMode {
             } => match cpu.instr_cycle {
                 2 => {
                     *pointer = cpu.memory.read_u8(cpu.program_counter);
+                    cpu.logger.add_data_to_last_instr(*pointer);
                     cpu.program_counter += 1;
                     NotDone
                 }
@@ -950,13 +955,17 @@ impl AddressingMode {
                         *low_addr = low_addr_fixed;
                         NotDone
                     } else {
-                        Value(cpu.memory.read_u8(address))
+                        let value = cpu.memory.read_u8(address);
+                        cpu.logger.set_last_target_address(address, value);
+                        Value(value)
                     }
                 }
                 6 => {
                     // Page boundary was crossed, read from fixed address
                     let address = (*high_addr as u16 + 1) << 8 | (*low_addr as u16);
-                    Value(cpu.memory.read_u8(address))
+                    let value = cpu.memory.read_u8(address);
+                    cpu.logger.set_last_target_address(address, value);
+                    Value(value)
                 }
                 _ => unreachable!(),
             },
@@ -969,6 +978,7 @@ impl AddressingMode {
             } => match cpu.instr_cycle {
                 2 => {
                     *pointer = cpu.memory.read_u8(cpu.program_counter);
+                    cpu.logger.add_data_to_last_instr(*pointer);
                     cpu.program_counter += 1;
                     NotDone
                 }

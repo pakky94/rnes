@@ -6,5 +6,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+lazy_static = { version = "1.4.0" }
 sdl2 = { version = "0.34", features = [ "ttf" ] }
 time = { version = "0.3.2" }
+# serde = { version = "1.0", features = ["derive"] }

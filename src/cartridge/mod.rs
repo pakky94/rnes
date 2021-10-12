@@ -6,11 +6,15 @@ const BANK_1_OFFSET: u16 = 0x8000;
 const BANK_2_OFFSET: u16 = 0xC000;
 
 pub struct Cartridge {
+    header: [u8; 16],
+    data: Vec<u8>,
     mapper: Box<dyn Mapper>,
 }
 
 impl Cartridge {
     pub(crate) fn new(header: [u8; 16], data: Vec<u8>) -> Self {
+        let header_bac = header.clone();
+        let data_bac = data.clone();
         let mapper_low = (header[6] & 248) >> 4;
         let mapper_high = header[7] & 248; // 4 highest bits
         let mapper = mapper_high | mapper_low;
@@ -76,6 +80,8 @@ impl Cartridge {
                 
                 if prg_banks.len() == 1 {
                     Cartridge {
+                        header: header_bac,
+                        data: data_bac,
                         mapper: Box::new(mappers::NROM::new(
                             true,
                             [prg_banks[0], [0u8; 0x4000]],
@@ -89,6 +95,8 @@ impl Cartridge {
                     }
                 } else {
                     Cartridge {
+                        header: header_bac,
+                        data: data_bac,
                         mapper: Box::new(mappers::NROM::new(
                             false,
                             [prg_banks[0], prg_banks[1]],
@@ -107,10 +115,14 @@ impl Cartridge {
                 if chr_rom_banks == 0 {
                     chr_banks = vec![[0u8; 0x1000]; 32];
                     Cartridge {
+                        header: header_bac,
+                        data: data_bac,
                         mapper: Box::new(mappers::MMC1::new(prg_banks, chr_banks)),
                     }
                 } else {
                     Cartridge {
+                        header: header_bac,
+                        data: data_bac,
                         mapper: Box::new(mappers::MMC1::new(prg_banks, chr_banks)),
                     }
                 }
@@ -121,12 +133,16 @@ impl Cartridge {
 
     pub fn from_vec(memory: Vec<u8>) -> Self {
         Self {
+            header: [0; 16],
+            data: memory.clone(),
             mapper: Box::new(mappers::FromVec::new(memory)),
         }
     }
 
     pub(crate) fn empty() -> Self {
         Self {
+            header: [1; 16],
+            data: Vec::new(),
             mapper: Box::new(mappers::Empty {}),
         }
     }
@@ -145,5 +161,18 @@ impl Cartridge {
     }
     pub(crate) fn tick(&mut self) {
         self.mapper.tick()
+    }
+    pub(crate) fn get_save_data(&self) -> Vec<u8> {
+        self.mapper.as_ref().get_save_ram()
+    }
+    pub(crate) fn set_save_data(&mut self, data: Vec<u8>) {
+        self.mapper.as_mut().set_save_ram(data)
+    }
+    pub(crate) fn reset(&mut self) {
+        match self.header[0] {
+            0 => *self = Self::from_vec(self.data.clone()),
+            1 => *self = Self::empty(),
+            _ => *self = Self::new(self.header.clone(), self.data.clone()),
+        }
     }
 }

@@ -1,15 +1,21 @@
 pub(crate) struct Envelope {
-    start_flag: bool,
-    dividerloop_flag: bool,
+    pub start_flag: bool,
+    pub loop_flag: bool,
+    pub start_parameter: u8,
+
     divider: u8,
     decay_level: u8,
-    start_parameter: u8,
 }
 
 impl Envelope {
     pub(crate) fn new() -> Self {
         Self {
-            
+            start_flag: false,
+            loop_flag: false,
+            start_parameter: 0,
+
+            divider: 0,
+            decay_level: 0,
         }
     }
 
@@ -34,7 +40,7 @@ impl Envelope {
         }
     }
 
-    pub(crate) fn get_volume(&self) {
+    pub(crate) fn get_volume(&self) -> u8 {
         self.decay_level
     }
 }

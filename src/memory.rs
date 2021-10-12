@@ -1,5 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
+use crate::cartridge;
 use crate::cpu::addresses::{EXPANSION_ROM, IO_REGISTERS_START, PRG_ROM_LOWER};
 use crate::input::{Controller, InputData};
 use crate::ppu::PpuIoRegisters;
@@ -51,6 +52,13 @@ impl MemoryInt {
         let mut out = Self::new();
         out.cpu_memory = vec;
         out
+    }
+
+    fn reset(&mut self) {
+        let mut new_self = Self::new();
+        std::mem::swap(&mut self.cartridge, &mut new_self.cartridge);
+        *self = new_self;
+        self.cartridge.reset();
     }
 
     fn cpu_read_unchanged_u8(&self, address: u16) -> u8 {
@@ -122,8 +130,8 @@ impl MemoryInt {
                     }
                 }
             }
-        } else if address < PRG_ROM_LOWER {
-            self.cpu_memory[address as usize]
+        //} else if address < PRG_ROM_LOWER {
+            //self.cpu_memory[address as usize]
         } else {
             self.cartridge.cpu_read(address)
         }
@@ -173,7 +181,10 @@ impl MemoryInt {
                         self.bus_action = BusAction::PpuAction(PpuAction::PpuAddrWrite(value))
                     }
                     0x2007 => {
-                        println!("Writing to PPUDATA: {:08b}, addr: {:#06x}", value, self.ppu_v);
+                        println!(
+                            "Writing to PPUDATA: {:08b}, addr: {:#06x}",
+                            value, self.ppu_v
+                        );
                         self.bus_action = BusAction::PpuAction(PpuAction::PpuDataWrite(value))
                     }
                     _ => unreachable!(
@@ -184,6 +195,9 @@ impl MemoryInt {
             } else {
                 // 0x4000-0x4020
                 match address {
+                    0x4000..=0x4013 | 0x4015 | 0x4017 => {
+                        self.bus_action = BusAction::ApuWrite((address, value));
+                    }
                     0x4014 => {
                         self.dma_address = (value as u16) << 8;
                         self.dma_cycle = 0;
@@ -196,8 +210,8 @@ impl MemoryInt {
                     _ => println!("Writing to I/O register: {:#06x}, {:#04x}", address, value),
                 }
             }
-        } else if address < PRG_ROM_LOWER {
-            self.cpu_memory[address as usize] = value;
+        //} else if address < PRG_ROM_LOWER {
+            //self.cpu_memory[address as usize] = value;
         } else {
             self.cartridge.cpu_write(address, value);
         }
@@ -296,8 +310,8 @@ impl MemoryInt {
                 self.dma_buffer = self.cpu_read_u8(self.dma_address + self.dma_offset as u16);
             } else {
                 self.oam_memory[self.dma_offset as usize] = self.dma_buffer;
-                self.dma_offset += 1;
                 //println!("OAM addr {:#04x} -> {:#04x}", self.dma_offset, self.dma_buffer);
+                self.dma_offset = self.dma_offset.wrapping_add(1);
             }
             self.dma_cycle += 1;
             true
@@ -372,7 +386,7 @@ impl PpuMemory {
         self.0.as_ref().borrow().oam_address_mirror
     }
 
-    pub(crate) fn oam_address_mirror_write(&self, addr : u8) {
+    pub(crate) fn oam_address_mirror_write(&self, addr: u8) {
         self.0.as_ref().borrow_mut().oam_address_mirror = addr;
     }
 }
@@ -389,14 +403,34 @@ impl MemoryHandle {
     }
 
     pub(crate) fn set_controller1_data(&mut self, input_data: InputData) {
-        self.0.as_ref().borrow_mut().controller1.set_input(input_data);
+        self.0
+            .as_ref()
+            .borrow_mut()
+            .controller1
+            .set_input(input_data);
+    }
+
+    pub(crate) fn get_save_data(&self) -> Vec<u8> {
+        self.0.as_ref().borrow().cartridge.get_save_data()
+    }
+
+    pub(crate) fn set_save_data(&mut self, data: Vec<u8>) {
+        self.0.as_ref().borrow_mut().cartridge.set_save_data(data);
     }
 }
 
-pub fn create_memory() -> (MemoryHandle, CpuMemory, PpuMemory) {
+pub struct ApuMemory(Rc<RefCell<MemoryInt>>);
+impl ApuMemory {
+    pub(crate) fn read_u8(&mut self, address: u16) -> u8 {
+        self.0.as_ref().borrow_mut().cpu_read_u8(address)
+    }
+}
+
+pub fn create_memory() -> (MemoryHandle, ApuMemory, CpuMemory, PpuMemory) {
     let m = Rc::new(RefCell::new(MemoryInt::new()));
     (
         MemoryHandle(Rc::clone(&m)),
+        ApuMemory(Rc::clone(&m)),
         CpuMemory(Rc::clone(&m)),
         PpuMemory(Rc::clone(&m)),
     )

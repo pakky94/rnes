@@ -44,11 +44,16 @@ impl SpriteUnit {
         is_8by8: bool,
     ) -> u16 {
         if is_8by8 {
-            let offset = self.get_y_on_current_line(screen_y) as u16;
+            let offset = self.get_y_on_current_line(screen_y, true) as u16;
             let tile_address = (self.tile_number as u16) << 4;
             pattern_table | tile_address | offset
         } else {
-            todo!()
+            let offset = self.get_y_on_current_line(screen_y, false) as u16;
+            let offset_low = offset & 0b111;
+            let offset_tile = (offset & 0b1000) << 1;
+            
+            let tile_address = (self.tile_number.rotate_right(1) as u16) << 5;
+            tile_address | offset_tile | offset_low
         }
     }
 
@@ -108,11 +113,19 @@ impl SpriteUnit {
         self.attributes >> 7 & 1 == 1
     }
 
-    fn get_y_on_current_line(&self, screen_y: usize) -> u8 {
-        if self.is_flipped_vert() {
-            8 - ((screen_y as u8) - self.y)
+    fn get_y_on_current_line(&self, screen_y: usize, is_8by8: bool) -> u8 {
+        if is_8by8 {
+            if self.is_flipped_vert() {
+                7 - ((screen_y as u8) - self.y)
+            } else {
+                (screen_y as u8) - self.y
+            }
         } else {
-            (screen_y as u8) - self.y
+            if self.is_flipped_vert() {
+                15 - ((screen_y as u8) - self.y)
+            } else {
+                (screen_y as u8) - self.y
+            }
         }
     }
 }

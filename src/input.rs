@@ -58,6 +58,9 @@ impl Controller {
     }
 
     pub(crate) fn read_from(&mut self) -> u8 {
+        if self.buffer.start {
+            println!("Reading start button press");
+        }
         match self.current_tick {
             0 => {
                 self.current_tick += 1;

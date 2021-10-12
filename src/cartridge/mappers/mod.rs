@@ -10,6 +10,8 @@ pub(crate) trait Mapper {
     fn ppu_read(&self, address: u16, internal_vram: &[u8; 0x800]) -> u8;
     fn ppu_write(&mut self, address: u16, value: u8, internal_vram: &mut [u8; 0x800]);
     fn tick(&mut self);
+    fn get_save_ram(&self) -> Vec<u8>;
+    fn set_save_ram(&mut self, data: Vec<u8>);
 }
 
 pub(crate) enum Mirroring {
@@ -26,14 +28,14 @@ impl Mapper for Empty {
     }
     fn write(&mut self, _address: u16, _value: u8) {}
     fn tick(&mut self) {}
-
     fn ppu_read(&self, _address: u16, _internal_vram: &[u8; 0x800]) -> u8 {
-        todo!()
+        0
     }
-
-    fn ppu_write(&mut self, _address: u16, _value: u8, _internal_vram: &mut [u8; 0x800]) {
-        todo!()
+    fn ppu_write(&mut self, _address: u16, _value: u8, _internal_vram: &mut [u8; 0x800]) {}
+    fn get_save_ram(&self) -> Vec<u8> {
+        vec![]
     }
+    fn set_save_ram(&mut self, _data: Vec<u8>) {}
 }
 
 pub(crate) struct FromVec(Vec<u8>);
@@ -51,6 +53,14 @@ impl Mapper for FromVec {
     }
 
     fn ppu_write(&mut self, _address: u16, _value: u8, _internal_vram: &mut [u8; 0x800]) {
+        todo!()
+    }
+
+    fn get_save_ram(&self) -> Vec<u8> {
+        todo!()
+    }
+
+    fn set_save_ram(&mut self, data: Vec<u8>) {
         todo!()
     }
 }

@@ -6,11 +6,10 @@ mod pulse;
 use pulse::Pulse;
 mod triangle;
 use triangle::Triangle;
-mod length_counter;
 mod envelope;
+mod length_counter;
 
 use std::{borrow::BorrowMut, collections::VecDeque};
-
 
 use sdl2::audio::{AudioCallback, AudioDeviceLockGuard, AudioSpec};
 
@@ -67,12 +66,13 @@ pub struct Apu {
     pulse1_silenced: bool,
     pulse2_silenced: bool,
     triangle_silenced: bool,
+    noise_silenced: bool,
 }
 
 struct FrameCounterAction {
     irc: bool,
-    sweep: bool,
-    envelope: bool,
+    length_counter_and_sweep: bool,
+    envelope_and_triangle_linear_counter: bool,
 }
 
 impl Apu {
@@ -84,7 +84,7 @@ impl Apu {
             triangle: Triangle::new(),
             noise: Noise::new(),
             dmc: Dmc::new(),
-            
+
             //output: Vec::new(),
             output: VecDeque::new(),
             cycle: 0,
@@ -98,19 +98,33 @@ impl Apu {
             pulse1_silenced: false,
             pulse2_silenced: false,
             triangle_silenced: false,
+            noise_silenced: false,
         }
     }
 
     pub fn tick(&mut self, bus_action: BusAction) {
         let frame_counter = self.frame_counter_action();
         if self.cycle % 2 == 0 {
-            self.pulse1
-                .tick(frame_counter.sweep, frame_counter.envelope, true);
-            self.pulse2
-                .tick(frame_counter.sweep, frame_counter.envelope, false);
+            self.pulse1.tick(
+                frame_counter.length_counter_and_sweep,
+                frame_counter.envelope_and_triangle_linear_counter,
+                true,
+            );
+            self.pulse2.tick(
+                frame_counter.length_counter_and_sweep,
+                frame_counter.envelope_and_triangle_linear_counter,
+                false,
+            );
+            self.noise.tick(
+                frame_counter.envelope_and_triangle_linear_counter,
+                frame_counter.length_counter_and_sweep,
+            );
         }
 
-        self.triangle.tick(frame_counter.sweep, frame_counter.envelope);
+        self.triangle.tick(
+            frame_counter.length_counter_and_sweep,
+            frame_counter.envelope_and_triangle_linear_counter,
+        );
         self.dmc.tick(&mut self.memory);
 
         if let BusAction::ApuWrite((address, value)) = bus_action {
@@ -156,6 +170,13 @@ impl Apu {
                         self.triangle_silenced = false;
                     }
 
+                    if value & 0b0000_0100 == 0 {
+                        self.noise_silenced = true;
+                        self.noise.length_counter = 0;
+                    } else {
+                        self.noise_silenced = false;
+                    }
+
                     if value & 0b0001_0000 == 0 {
                         self.dmc.sample_bytes_remaining = 0;
                     } else {
@@ -191,14 +212,19 @@ impl Apu {
             } else {
                 self.triangle.next_value()
             };
-
+            let n = if self.noise_silenced {
+                0
+            } else {
+                self.noise.next_value()
+            };
             let d = self.dmc.next_value();
 
-            let tnd = (t + d) as usize;
+            let tnd = (t + n + d) as usize;
 
             let out = PULSE_TABLE[p] + TND_TABLE[tnd];
-            //let out = PULSE_TABLE[0] + TND_TABLE[t as usize];
-            //let out = TND_TABLE[d as usize];
+
+            //let out = PULSE_TABLE[p];
+            //let out = TND_TABLE[n as usize];
 
             self.output.push_back(out);
         }
@@ -213,28 +239,28 @@ impl Apu {
     }
 
     fn frame_counter_action(&mut self) -> FrameCounterAction {
-        if self.cycle % 7457 == 0 {
+        if self.cycle % 7458 == 0 {
             if self.frame_counter_mode == 0 {
                 let v = match self.frame_counter_cycle {
                     0 => FrameCounterAction {
                         irc: false,
-                        sweep: false,
-                        envelope: true,
+                        length_counter_and_sweep: false,
+                        envelope_and_triangle_linear_counter: true,
                     },
                     1 => FrameCounterAction {
                         irc: false,
-                        sweep: true,
-                        envelope: true,
+                        length_counter_and_sweep: true,
+                        envelope_and_triangle_linear_counter: true,
                     },
                     2 => FrameCounterAction {
                         irc: false,
-                        sweep: false,
-                        envelope: true,
+                        length_counter_and_sweep: false,
+                        envelope_and_triangle_linear_counter: true,
                     },
                     3 => FrameCounterAction {
                         irc: !self.irq_inhibited,
-                        sweep: true,
-                        envelope: true,
+                        length_counter_and_sweep: true,
+                        envelope_and_triangle_linear_counter: true,
                     },
                     _ => unreachable!(),
                 };
@@ -244,28 +270,28 @@ impl Apu {
                 let v = match self.frame_counter_cycle {
                     0 => FrameCounterAction {
                         irc: false,
-                        sweep: false,
-                        envelope: true,
+                        length_counter_and_sweep: false,
+                        envelope_and_triangle_linear_counter: true,
                     },
                     1 => FrameCounterAction {
                         irc: false,
-                        sweep: true,
-                        envelope: true,
+                        length_counter_and_sweep: true,
+                        envelope_and_triangle_linear_counter: true,
                     },
                     2 => FrameCounterAction {
                         irc: false,
-                        sweep: false,
-                        envelope: true,
+                        length_counter_and_sweep: false,
+                        envelope_and_triangle_linear_counter: true,
                     },
                     3 => FrameCounterAction {
                         irc: false,
-                        sweep: false,
-                        envelope: false,
+                        length_counter_and_sweep: false,
+                        envelope_and_triangle_linear_counter: false,
                     },
                     4 => FrameCounterAction {
                         irc: false,
-                        sweep: true,
-                        envelope: true,
+                        length_counter_and_sweep: true,
+                        envelope_and_triangle_linear_counter: true,
                     },
                     _ => unreachable!(),
                 };
@@ -275,8 +301,8 @@ impl Apu {
         } else {
             FrameCounterAction {
                 irc: false,
-                sweep: false,
-                envelope: false,
+                length_counter_and_sweep: false,
+                envelope_and_triangle_linear_counter: false,
             }
         }
     }
@@ -320,11 +346,11 @@ impl AudioCallback for AudioGenerator {
         }
         //let mut fuckup = false;
         //while self.values.len() > 5000 {
-            //if !fuckup {
-                //eprintln!("fuckup {} {}", self.values.len(), out.len());
-                //fuckup = true;
-            //}
-            //self.values.pop_front();
+        //if !fuckup {
+        //eprintln!("fuckup {} {}", self.values.len(), out.len());
+        //fuckup = true;
+        //}
+        //self.values.pop_front();
         //}
         for (i, x) in out.iter_mut().enumerate() {
             if skipping && i % skip_every == 0 {
@@ -359,12 +385,12 @@ impl AudioCallback for AudioGenerator {
 }
 
 //fn merge_samples(input: &[f32], out: &mut [f32]) {
-    //let l_in = input.len();
-    //let l_out = out.len();
+//let l_in = input.len();
+//let l_out = out.len();
 //
-    //let mut j = 0;
-    //let mut k = 0;
-    //for (i, x) in out.iter_mut().enumerate() {
-        //*x = (input[j] + input[k]) / 2.;
-    //}
+//let mut j = 0;
+//let mut k = 0;
+//for (i, x) in out.iter_mut().enumerate() {
+//*x = (input[j] + input[k]) / 2.;
+//}
 //}

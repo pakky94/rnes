@@ -103,8 +103,8 @@ impl Logger {
         out.push_str(opcode_to_mnemonic(instr.data[0]));
         out.push(' ');
 
-        if let Some((addr, _val)) = instr.target_address.as_ref() {
-            out.push_str(&format!("${:04X}", addr,));
+        if let Some((addr, val)) = instr.target_address.as_ref() {
+            out.push_str(&format!("${:04X} = {:#04X}", addr, val));
         }
 
         while out.len() < 48 {

@@ -101,6 +101,8 @@ impl Cpu {
         );
         self.stack_pointer = self.stack_pointer.wrapping_sub(3);
         // TODO: initialize state
+        self.cycles = 0;
+        self.instr_cycle = 0;
         self.reset_processor_status();
     }
 
